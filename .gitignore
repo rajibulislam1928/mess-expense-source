@@ -1,0 +1,15 @@
+# Local Android/Gradle state
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+
+# Private Firebase and signing configuration
+**/google-services.json
+*.jks
+*.keystore
+*.p12
+*.pem
+key.properties
+service-account*.json

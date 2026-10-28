@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function member(groupId) {
+      return signedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+    function owner(groupId) {
+      return member(groupId)
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+    function groupInvite(groupId, inviteId, uid) {
+      let invite = getAfter(/databases/$(database)/documents/invites/$(inviteId)).data;
+      return invite.groupId == groupId
+        && invite.active == true
+        && invite.consumedBy == uid
+        && invite.expiresAt > request.time;
+    }
+
+    match /groups/{groupId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 50
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner';
+      allow get: if member(groupId);
+      allow list: if false;
+      allow update: if owner(groupId)
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'createdAt'])
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 50;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow get: if member(groupId) || (signedIn() && uid == request.auth.uid);
+        allow list: if member(groupId);
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['role', 'joinedAt', 'inviteId'])
+          && ((request.resource.data.role == 'owner'
+                && !('inviteId' in request.resource.data)
+                && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == request.auth.uid)
+              || (request.resource.data.role == 'member'
+                && request.resource.data.inviteId is string
+                && groupInvite(groupId, request.resource.data.inviteId, request.auth.uid)));
+        allow update, delete: if false;
+      }
+
+      match /events/{eventId} {
+        allow get, list: if member(groupId);
+        allow create: if member(groupId)
+          && request.resource.data.keys().hasOnly(['id', 'time', 'device', 'patch'])
+          && request.resource.data.keys().hasAll(['id', 'time', 'device', 'patch'])
+          && request.resource.data.id == eventId
+          && request.resource.data.time is string
+          && request.resource.data.device is string
+          && request.resource.data.patch is list
+          && request.resource.data.patch.size() > 0;
+        allow update, delete: if false;
+      }
+    }
+
+    match /users/{uid}/groups/{groupId} {
+      allow get, list: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'role', 'joinedAt'])
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.role == request.resource.data.role;
+      allow update: if signedIn() && request.auth.uid == uid
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.role == request.resource.data.role;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /invites/{inviteId} {
+      allow get: if signedIn() && (
+        (resource.data.active == true && resource.data.expiresAt > request.time)
+        || owner(resource.data.groupId));
+      allow list: if owner(resource.data.groupId);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['groupId', 'groupName', 'createdBy', 'createdAt', 'expiresAt', 'active', 'consumedBy'])
+        && inviteId.matches('^[0-9A-F]{32}$')
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.active == true
+        && request.resource.data.consumedBy == null
+        && request.resource.data.expiresAt > request.time
+        && owner(request.resource.data.groupId);
+      allow update: if signedIn() && (
+        (owner(resource.data.groupId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active'])
+          && request.resource.data.active == false)
+        || (resource.data.active == true
+          && resource.data.expiresAt > request.time
+          && resource.data.consumedBy == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consumedBy'])
+          && request.resource.data.consumedBy == request.auth.uid));
+      allow delete: if owner(resource.data.groupId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

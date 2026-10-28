@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16695a">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Mess Expense Tracker</title>
+<style>
+  :root {
+    --brand: #16695a;
+    --brand-2: #2fa58a;
+    --accent: #f2a541;
+    --bg: #eef3f1;
+    --card: #ffffff;
+    --ink: #17302a;
+    --muted: #6f807a;
+    --line: #e1e9e6;
+    --soft: #f6f9f8;
+    --pos: #17804a;
+    --pos-bg: #e3f6ea;
+    --neg: #c2412d;
+    --neg-bg: #fde9e5;
+    --shadow: 0 1px 2px rgba(20,50,40,.06), 0 6px 20px rgba(20,50,40,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1b18; --card: #17262299; --card: #172621; --ink: #e6f2ee; --muted: #93a7a1;
+      --line: #263a34; --soft: #1c2f29; --pos: #6ee09a; --pos-bg: #173a28; --neg: #ff8a78; --neg-bg: #3d1f1a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink);
+  }
+  header {
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff; padding: 22px 18px 42px; position: relative;
+  }
+  header .top { max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  header .logo {
+    width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.18);
+    display: grid; place-items: center; font-size: 22px;
+  }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+  header p { margin: 2px 0 0; font-size: 13px; opacity: .85; }
+  main { max-width: 920px; margin: -26px auto 0; padding: 0 12px 30px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px; margin-bottom: 16px; box-shadow: var(--shadow);
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card-head .ico {
+    width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center;
+    background: var(--soft); font-size: 16px;
+  }
+  .card-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+  .card-head .sub { margin-left: auto; font-size: 12px; color: var(--muted); }
+  label.small { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; font-weight: 600; }
+  input[type=text], input[type=number], input[type=date] {
+    width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; background: var(--soft); color: var(--ink); outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus { border-color: var(--brand-2); box-shadow: 0 0 0 3px rgba(47,165,138,.2); background: var(--card); }
+  input[type=number] { text-align: center; padding: 8px 4px; -moz-appearance: textfield; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { opacity: .4; }
+  .date-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+  .range-chip {
+    background: var(--soft); border: 1px dashed var(--line); border-radius: 10px;
+    padding: 9px 12px; font-size: 14px; font-weight: 600; white-space: nowrap; color: var(--brand);
+  }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 12px; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+  th, td { padding: 7px 6px; vertical-align: middle; }
+  thead th {
+    font-size: 12px; color: var(--muted); font-weight: 700; text-align: center;
+    text-transform: uppercase; letter-spacing: .4px; padding-bottom: 8px;
+  }
+  thead tr.days th { color: var(--brand); font-size: 13px; text-transform: none; letter-spacing: 0; }
+  tbody tr { border-top: 1px solid var(--line); }
+  tbody tr:hover td { background: var(--soft); }
+  tfoot td { border-top: 2px solid var(--line); font-weight: 700; text-align: center; padding-top: 10px; }
+  td.name, th.name { text-align: left; min-width: 120px; font-weight: 700; position: sticky; left: 0; background: var(--card); z-index: 1; }
+  th.name { background: var(--card); }
+  tbody tr:hover td.name { background: var(--soft); }
+  .sep { border-left: 2px solid var(--line); }
+  .avatar {
+    display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--brand-2), var(--accent)); color: #fff; font-size: 12px; font-weight: 700;
+    margin-right: 8px; vertical-align: middle;
+  }
+  .total-pill {
+    display: inline-block; min-width: 30px; padding: 3px 8px; border-radius: 999px;
+    background: var(--soft); color: var(--brand); font-weight: 700; text-align: center;
+  }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stat {
+    border-radius: 14px; padding: 12px; color: #fff;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  }
+  .stat:nth-child(2) { background: linear-gradient(135deg, #3c6ea8, #5b9bd5); }
+  .stat:nth-child(3) { background: linear-gradient(135deg, #b87412, var(--accent)); }
+  .stat:nth-child(4) { background: linear-gradient(135deg, #7a4fa3, #a57fd1); }
+  .stat small { display: block; font-size: 12px; opacity: .9; }
+  .stat b { display: block; font-size: 22px; margin-top: 4px; }
+  .chip { display: inline-block; padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+  .chip.pos { background: var(--pos-bg); color: var(--pos); }
+  .chip.neg { background: var(--neg-bg); color: var(--neg); }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    background: var(--brand); color: #fff; border: 0; border-radius: 10px;
+    padding: 10px 15px; font-size: 14px; font-weight: 600; cursor: pointer; transition: transform .1s, opacity .15s;
+  }
+  button:active { transform: scale(.97); }
+  button.ghost { background: var(--card); color: var(--brand); border: 1px solid var(--line); }
+  button.danger { background: var(--neg); }
+  button:disabled { opacity: .4; cursor: default; }
+  .memrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .memrow input { flex: 1; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .auth-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin-bottom:10px; }
+  .auth-grid input { width:100%; min-width:0; padding:10px; border:1px solid var(--line); border-radius:10px; font:inherit; background:var(--soft); color:var(--ink); }
+  .auth-status { min-height:1.3em; font-size:13px; color:var(--muted); margin-top:8px; }
+  .auth-status.error { color:var(--neg); }
+  .auth-status.ok { color:var(--pos); }
+  .invite-code { font:700 18px ui-monospace,monospace; letter-spacing:1px; overflow-wrap:anywhere; }
+  .signed-in-only[hidden], .signed-out-only[hidden] { display:none !important; }
+  .summary-table td.num { text-align: center; }
+  @media (max-width: 620px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .date-row { grid-template-columns: 1fr; }
+    header { padding-bottom: 36px; }
+  }
+</style>
+<script>
+// A one-time Android upgrade bridge copies the old file-origin tracker state in the URL fragment.
+// Fragments stay on-device and are never sent in HTTP requests or referrers.
+(function() {
+  const prefix = "#legacy-state=";
+  if (!location.hash.startsWith(prefix)) return;
+  try {
+    let encoded = location.hash.slice(prefix.length).replace(/-/g, "+").replace(/_/g, "/");
+    while (encoded.length % 4) encoded += "=";
+    const bytes = Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
+    const saved = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+    if (saved && Array.isArray(saved.members) && Array.isArray(saved.meals) && Array.isArray(saved.spend))
+      localStorage.setItem("mess-expense-state-v1", JSON.stringify(saved));
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch (_) {}
+})();
+</script>
+
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="logo">🍛</div>
+    <div>
+      <h1>Mess Expense Tracker</h1>
+      <p>Meals, bazar spending and who owes whom</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- FIREBASE SHARED SYNC -->
+  <section class="card" id="accountCard">
+    <div class="card-head"><div class="ico">☁️</div><h2>Firebase live sync</h2><span class="sub" id="accountLabel">Local only</span></div>
+    <p class="hint">Sign in with Google, create a group, then share a one-time invite code. Only signed-in group members can read or change that group's tracker.</p>
+    <div class="btns">
+      <button id="connectFirebaseBtn">Connect Google account</button>
+      <button class="ghost" id="syncNowBtn">Sync now</button>
+      <button class="ghost" id="submitDataBtn" disabled>Submit to Firestore</button>
+    </div>
+    <div class="auth-status" id="authStatus" role="status" aria-live="polite">Your tracker is saved on this phone. Connect Google, then create or join a group to sync.</div>
+    <div id="groupPanel" hidden>
+      <label class="small" for="groupSelect">Current group</label>
+      <div class="btns">
+        <select id="groupSelect" aria-label="Current group"><option value="">Choose a group</option></select>
+      </div>
+      <div class="btns">
+        <input id="newGroupName" maxlength="50" placeholder="New group name" aria-label="New group name">
+        <button id="createGroupBtn" class="ghost" disabled>Create group</button>
+      </div>
+      <div class="btns">
+        <input id="joinCodeInput" maxlength="40" autocomplete="off" autocapitalize="characters" placeholder="Paste 32-character invite code" aria-label="Invite code">
+        <button id="joinGroupBtn" class="ghost" disabled>Join group</button>
+      </div>
+      <div id="ownerInvitePanel" hidden>
+        <div class="btns"><button id="createInviteBtn" class="ghost" disabled>Create invite code</button></div>
+        <div id="inviteStatus" class="hint" role="status"></div>
+        <div id="inviteList"></div>
+      </div>
+    </div>
+    <div id="syncConflict" class="auth-status error" hidden role="alert">
+      <strong id="conflictTitle">Both phones changed the same data.</strong> <span id="conflictText">Choose which copy to keep; neither change will be silently overwritten.</span>
+      <div class="btns"><button id="useCloudBtn" class="ghost">Use shared copy</button><button id="keepLocalBtn">Keep this phone's copy</button></div>
+    </div>
+  </section>
+  <!-- DATE -->
+  <section class="card">
+    <div class="card-head"><div class="ico">📅</div><h2>Week</h2><span class="sub" id="weekNo"></span></div>
+    <div class="date-row">
+      <div>
+        <label class="small" for="startDate">Week starts on (Monday)</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="range-chip" id="rangeText">Pick a date</div>
+    </div>
+  </section>
+
+  <!-- MEALS -->
+  <section class="card">
+    <div class="card-head"><div class="ico">🍽️</div><h2>Meals</h2><span class="sub">Lunch and dinner per day</span></div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr class="days">
+            <th class="name">Name</th>
+            <th colspan="2" class="sep" id="h0">Mon</th>
+            <th colspan="2" class="sep" id="h1">Tue</th>
+            <th colspan="2" class="sep" id="h2">Wed</th>
+            <th colspan="2" class="sep" id="h3">Thu</th>
+            <th colspan="2" class="sep" id="h4">Fri</th>
+            <th colspan="2" class="sep" id="h5">Sat</th>
+            <th colspan="2" class="sep" id="h6">Sun</th>
+            <th class="sep">Total</th>
+          </tr>
+          <tr>
+            <th class="name"></th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Lunch</th><th>Dinner</th>
+            <th class="sep">Meals</th>
+          </tr>
+        </thead>
+        <tbody id="mealBody"></tbody>
+        <tfoot><tr id="mealFoot"></tr></tfoot>
+      </table>
+    </div>
+    <div class="hint">Enter the number of meals each person ate on each day.</div>
+  </section>
+
+  <!-- EXPENSES -->
+  <section class="card">
+    <div class="card-head"><div class="ico">🛒</div><h2>Expenses</h2><span class="sub">Money spent per person</span></div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="name">Name</th>
+            <th>Morning</th>
+            <th>Night</th>
+            <th>Extra</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="expenseBody"></tbody>
+        <tfoot><tr id="expenseFoot"></tr></tfoot>
+      </table>
+    </div>
+    <div class="hint">Enter the amount each person spent.</div>
+  </section>
+
+  <!-- SUMMARY -->
+  <section class="card">
+    <div class="card-head"><div class="ico">📊</div><h2>Summary</h2></div>
+    <div class="stats">
+      <div class="stat"><small>Total meals</small><b id="sMeals">0</b></div>
+      <div class="stat"><small>Total spent</small><b id="sBazar">0.00</b></div>
+      <div class="stat"><small>Cost per meal</small><b id="sPer">0.00</b></div>
+      <div class="stat"><small>Members</small><b id="sCount">0</b></div>
+    </div>
+    <div class="scroll" style="margin-top:14px;">
+      <table class="summary-table">
+        <thead><tr><th class="name">Name</th><th>Meals</th><th>Spent</th><th>Meal cost</th><th>Balance</th></tr></thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+    <div class="hint">Balance = spent minus meal cost. Green means the person gets money back; red means they owe.</div>
+  </section>
+
+  <!-- MEMBERS -->
+  <section class="card">
+    <div class="card-head"><div class="ico">👥</div><h2>Members</h2></div>
+    <div id="memberList"></div>
+    <div class="btns" style="margin-top:8px;">
+      <button class="ghost" id="addMember">+ Add member</button>
+    </div>
+  </section>
+
+  <!-- DATA -->
+  <section class="card">
+    <div class="card-head"><div class="ico">💾</div><h2>Data</h2></div>
+    <div class="btns">
+      <button class="ghost" id="exportBtn">Export .xlsx</button>
+      <button class="ghost" id="importBtn">Import .xlsx</button>
+      <button class="danger" id="resetBtn">Reset week</button>
+    </div>
+    <div class="hint">Data saves on this device. Export or import a Mess Expense .xlsx workbook using the device file picker. When configured, Firebase sync uses the same Google account on each phone.</div>
+  </section>
+</main>
+
+<script>
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DEFAULT_MEMBERS = ["Rajibul", "Manoj da", "Ajij", "Sohel da", "Naimul", "Faijul", "Indra"];
+
+// meals[i][d] = [lunch, dinner]; spend[i] = {morning, night, extra}
+let state = { startDate: "", members: [], meals: [], spend: [] };
+
+function blankMeals() { return DAYS.map(() => [0, 0]); }
+
+function freshState() {
+  // Start with the week shown in the supplied workbook; its meal and expense cells were empty.
+  state.startDate = "2026-09-14";
+  state.members = DEFAULT_MEMBERS.slice();
+  state.meals = state.members.map(blankMeals);
+  state.spend = state.members.map(() => ({ morning: 0, night: 0, extra: 0 }));
+}
+
+const num = v => (isFinite(parseFloat(v)) ? Math.max(0, parseFloat(v)) : 0);
+const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STORAGE_KEY = "mess-expense-state-v1";
+
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+  if (!applyingRemoteState) queueFirebaseSave();
+}
+
+function loadSavedState() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (!d || !Array.isArray(d.members) || !Array.isArray(d.meals) || !Array.isArray(d.spend)) return false;
+    state = {
+      startDate: /^\d{4}-\d{2}-\d{2}$/.test(d.startDate || "") ? d.startDate : "2026-09-14",
+      members: d.members.map(String),
+      meals: d.members.map((_, i) => DAYS.map((_, k) => {
+        const day = ((d.meals[i] || [])[k]) || [];
+        return [num(day[0]), num(day[1])];
+      })),
+      spend: d.members.map((_, i) => {
+        const spend = d.spend[i] || {};
+        return { morning: num(spend.morning), night: num(spend.night), extra: num(spend.extra) };
+      })
+    };
+    return state.members.length > 0;
+  } catch (_) { return false; }
+}
+const initial = name => (String(name).trim()[0] || "?").toUpperCase();
+
+function dayDate(d) {
+  if (!state.startDate) return "";
+  const [y, m, dd] = state.startDate.split("-").map(Number);
+  return new Date(y, m - 1, dd + d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function weekNumber() {
+  if (!state.startDate) return "";
+  const [y, m, d] = state.startDate.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  return "Week " + Math.ceil(((dt - yearStart) / 86400000 + 1) / 7);
+}
+
+function compute() {
+  const mealsPer = state.members.map((_, i) =>
+    state.meals[i].reduce((sum, day) => sum + day[0] + day[1], 0));
+  const totalMeals = mealsPer.reduce((a, b) => a + b, 0);
+  const spentPer = state.spend.map(s => s.morning + s.night + s.extra);
+  const totalSpent = spentPer.reduce((a, b) => a + b, 0);
+  const perMeal = totalMeals > 0 ? totalSpent / totalMeals : 0;
+  const rows = state.members.map((name, i) => {
+    const cost = mealsPer[i] * perMeal;
+    return { name, meals: mealsPer[i], spent: spentPer[i], cost, balance: spentPer[i] - cost };
+  });
+  return { rows, totalMeals, totalSpent, perMeal };
+}
+
+function renderDates() {
+  document.getElementById("startDate").value = state.startDate;
+  document.getElementById("rangeText").textContent = state.startDate
+    ? `${dayDate(0)} – ${dayDate(6)}`
+    : "Pick a date";
+  document.getElementById("weekNo").textContent = weekNumber();
+  DAYS.forEach((d, i) => {
+    document.getElementById("h" + i).textContent = state.startDate ? `${d} ${dayDate(i)}` : d;
+  });
+}
+
+function renderMeals() {
+  document.getElementById("mealBody").innerHTML = state.members.map((name, i) => {
+    const cells = DAYS.map((_, d) => `
+      <td class="sep"><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][0]}" data-kind="lunch" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} lunch"></td>
+      <td><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][1]}" data-kind="dinner" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} dinner"></td>`).join("");
+    const total = state.meals[i].reduce((s, day) => s + day[0] + day[1], 0);
+    return `<tr><td class="name"><span class="avatar">${esc(initial(name))}</span>${esc(name)}</td>${cells}<td class="sep"><span class="total-pill" data-mt="${i}">${total}</span></td></tr>`;
+  }).join("");
+
+  // column totals per day
+  const colTotals = DAYS.map((_, d) => [
+    state.meals.reduce((s, m) => s + m[d][0], 0),
+    state.meals.reduce((s, m) => s + m[d][1], 0)
+  ]);
+  const grand = colTotals.reduce((s, [a, b]) => s + a + b, 0);
+  document.getElementById("mealFoot").innerHTML =
+    `<td class="name">Day total</td>` +
+    colTotals.map(([a, b]) => `<td class="sep">${a}</td><td>${b}</td>`).join("") +
+    `<td class="sep">${grand}</td>`;
+}
+
+function renderExpenses() {
+  document.getElementById("expenseBody").innerHTML = state.members.map((name, i) => {
+    const s = state.spend[i];
+    const total = s.morning + s.night + s.extra;
+    return `<tr>
+      <td class="name"><span class="avatar">${esc(initial(name))}</span>${esc(name)}</td>
+      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.morning}" data-kind="morning" data-i="${i}" aria-label="${esc(name)} morning"></td>
+      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.night}" data-kind="night" data-i="${i}" aria-label="${esc(name)} night"></td>
+      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.extra}" data-kind="extra" data-i="${i}" aria-label="${esc(name)} extra"></td>
+      <td><span class="total-pill" data-et="${i}">${fmt(total)}</span></td>
+    </tr>`;
+  }).join("");
+
+  const sums = ["morning", "night", "extra"].map(k => state.spend.reduce((s, x) => s + x[k], 0));
+  document.getElementById("expenseFoot").innerHTML =
+    `<td class="name">Total</td>` + sums.map(v => `<td>${fmt(v)}</td>`).join("") +
+    `<td>${fmt(sums.reduce((a, b) => a + b, 0))}</td>`;
+}
+
+// Update only totals while typing, so the input being edited keeps focus
+function refreshMeals() {
+  state.members.forEach((_, i) => {
+    const el = document.querySelector(`[data-mt="${i}"]`);
+    if (el) el.textContent = state.meals[i].reduce((s, d) => s + d[0] + d[1], 0);
+  });
+  const colTotals = DAYS.map((_, d) => [
+    state.meals.reduce((s, m) => s + m[d][0], 0),
+    state.meals.reduce((s, m) => s + m[d][1], 0)
+  ]);
+  const grand = colTotals.reduce((s, [a, b]) => s + a + b, 0);
+  document.getElementById("mealFoot").innerHTML =
+    `<td class="name">Day total</td>` +
+    colTotals.map(([a, b]) => `<td class="sep">${a}</td><td>${b}</td>`).join("") +
+    `<td class="sep">${grand}</td>`;
+}
+
+function refreshExpenses() {
+  state.members.forEach((_, i) => {
+    const s = state.spend[i];
+    const el = document.querySelector(`[data-et="${i}"]`);
+    if (el) el.textContent = fmt(s.morning + s.night + s.extra);
+  });
+  const sums = ["morning", "night", "extra"].map(k => state.spend.reduce((s, x) => s + x[k], 0));
+  document.getElementById("expenseFoot").innerHTML =
+    `<td class="name">Total</td>` + sums.map(v => `<td>${fmt(v)}</td>`).join("") +
+    `<td>${fmt(sums.reduce((a, b) => a + b, 0))}</td>`;
+}
+
+function renderMembers() {
+  document.getElementById("memberList").innerHTML = state.members.map((name, i) => `
+    <div class="memrow">
+      <span class="avatar">${esc(initial(name))}</span>
+      <input type="text" value="${esc(name)}" data-kind="name" data-i="${i}" aria-label="Member ${i + 1} name">
+      <button class="ghost" data-kind="remove" data-i="${i}" ${state.members.length <= 1 ? "disabled" : ""}>Remove</button>
+    </div>`).join("");
+}
+
+function renderSummary() {
+  const c = compute();
+  document.getElementById("sMeals").textContent = c.totalMeals;
+  document.getElementById("sBazar").textContent = fmt(c.totalSpent);
+  document.getElementById("sPer").textContent = fmt(c.perMeal);
+  document.getElementById("sCount").textContent = state.members.length;
+  document.getElementById("summaryBody").innerHTML = c.rows.map(r => `
+    <tr>
+      <td class="name"><span class="avatar">${esc(initial(r.name))}</span>${esc(r.name)}</td>
+      <td class="num">${r.meals}</td>
+      <td class="num">${fmt(r.spent)}</td>
+      <td class="num">${fmt(r.cost)}</td>
+      <td class="num"><span class="chip ${r.balance >= 0 ? "pos" : "neg"}">${r.balance >= 0 ? "+" : ""}${fmt(r.balance)}</span></td>
+    </tr>`).join("");
+}
+
+function renderAll() {
+  renderDates();
+  renderMeals();
+  renderExpenses();
+  renderMembers();
+  renderSummary();
+  saveState();
+}
+
+// ---- Google Firebase sync (native Google authorization, no app account) ----
+let firebaseConnected = false;
+let firebaseReady = false;
+let googleAccount = "";
+let syncTimer = null;
+let saveTimer = null;
+let isSyncing = false;
+let syncAgain = false;
+let applyingRemoteState = false;
+let lastSharedState = null;
+let lastSeenEventIds = new Set();
+let pendingEvent = null;
+let conflictRemoteState = null;
+let conflictNeedsPublish = false;
+let syncBlockedForConflict = false;
+let groups = [];
+let activeGroupId = localStorage.getItem("mess-expense-active-group-v1") || "";
+let activeGroupRole = "";
+let approvedEmptyGroupSeed = false;
+const createdGroupIds = new Set();
+let emptyGroupNeedsChoice = false;
+const callbackPromises = new Map();
+const DEVICE_KEY = "mess-expense-sync-device-v1";
+function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = "device-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2));
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
+const syncDeviceId = getDeviceId();
+let callbackCounter = 0;
+function nativeFirebaseCall(method, ...args) {
+  if (!window.MessFirebase || typeof window.MessFirebase[method] !== "function")
+    return Promise.reject(new Error("Google sync is available only in the Android app."));
+  const id = "cb-" + (++callbackCounter) + "-" + Date.now();
+  return new Promise((resolve, reject) => {
+    callbackPromises.set(id, { resolve, reject });
+    try { window.MessFirebase[method](id, ...args); }
+    catch (e) { callbackPromises.delete(id); reject(e); }
+  });
+}
+window.onFirebaseNativeResult = (id, result) => {
+  const pending = callbackPromises.get(id);
+  if (!pending) return;
+  callbackPromises.delete(id);
+  if (result && result.ok) pending.resolve(result);
+  else pending.reject(new Error((result && result.error) || "Google sync failed."));
+};
+function setAuthStatus(message, kind = "") {
+  const el = document.getElementById("authStatus");
+  el.textContent = message;
+  el.className = "auth-status" + (kind ? " " + kind : "");
+}
+function setConnected(account) {
+  firebaseConnected = true;
+  googleAccount = account || googleAccount;
+  document.getElementById("accountLabel").textContent = googleAccount ? "Connected · " + googleAccount : "Firebase connected";
+  document.getElementById("connectFirebaseBtn").textContent = "Reconnect Google account";
+  updateGroupControls();
+}
+function stopFirebaseListener() {
+  if (window.MessFirebase && typeof window.MessFirebase.stopListening === "function") { try { window.MessFirebase.stopListening(); } catch (_) {} }
+}
+function startFirebaseListener() {
+  if (!firebaseConnected || !activeGroupId) return;
+  nativeFirebaseCall("startListening", activeGroupId).catch(error => setAuthStatus((error && error.message) || "Firebase listener could not start.", "error"));
+}
+
+window.onFirebaseChanged = () => { if (firebaseConnected) syncNow(); };
+window.onFirebaseListenerError = message => {
+  setDisconnected();
+  setAuthStatus(message || "Firebase listener stopped.", "error");
+};
+function setDisconnected() {
+  firebaseConnected = false;
+  firebaseReady = false;
+  stopFirebaseListener();
+  document.getElementById("accountLabel").textContent = "Local only";
+  document.getElementById("connectFirebaseBtn").textContent = "Connect Google account";
+  updateGroupControls();
+}
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function equal(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function validSharedState(value) {
+  return !!value && (!(value.startDate || "") || /^\d{4}-\d{2}-\d{2}$/.test(value.startDate)) &&
+    Array.isArray(value.members) && value.members.length > 0 && value.members.length <= 100 &&
+    Array.isArray(value.meals) && Array.isArray(value.spend) &&
+    value.meals.length === value.members.length && value.spend.length === value.members.length &&
+    value.members.every(n => typeof n === "string" && n.length <= 100) &&
+    value.meals.every(row => Array.isArray(row) && row.length === 7 && row.every(day =>
+      Array.isArray(day) && day.length === 2 && day.every(v => Number.isFinite(Number(v)) && Number(v) >= 0))) &&
+    value.spend.every(row => row && ["morning", "night", "extra"].every(k =>
+      Number.isFinite(Number(row[k])) && Number(row[k]) >= 0));
+}
+function diffState(before, after, path = "", out = []) {
+  if (equal(before, after)) return out;
+  const plain = x => x && typeof x === "object" && !Array.isArray(x);
+  if (Array.isArray(before) && Array.isArray(after) && before.length === after.length) {
+    for (let i = 0; i < after.length; i++) diffState(before[i], after[i], path ? path + "." + i : String(i), out);
+  } else if (plain(before) && plain(after) && Object.keys(before).length === Object.keys(after).length &&
+             Object.keys(before).every(k => Object.prototype.hasOwnProperty.call(after, k))) {
+    for (const key of Object.keys(after)) diffState(before[key], after[key], path ? path + "." + key : key, out);
+  } else {
+    out.push({ path, value: clone(after) });
+  }
+  return out;
+}
+function applyOperations(base, operations) {
+  let result = base === null ? null : clone(base);
+  for (const op of operations) {
+    if (!safePatchOperation(op)) continue;
+    if (op.path === "") { result = clone(op.value); continue; }
+    if (result === null || typeof result !== "object") continue;
+    const keys = op.path.split(".");
+    let cursor = result;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const k = Array.isArray(cursor) ? Number(keys[i]) : keys[i];
+      if (cursor[k] === undefined || cursor[k] === null) break;
+      cursor = cursor[k];
+    }
+    const lastText = keys[keys.length - 1];
+    const last = Array.isArray(cursor) ? Number(lastText) : lastText;
+    if (cursor && typeof cursor === "object") cursor[last] = clone(op.value);
+  }
+  return result;
+}
+function pathsOverlap(a, b) {
+  const x = a.split("."), y = b.split(".");
+  const n = Math.min(x.length, y.length);
+  for (let i = 0; i < n; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+function safePatchOperation(op) {
+  if (!op || typeof op.path !== "string" || !Object.prototype.hasOwnProperty.call(op, "value")) return false;
+  const path = op.path, value = op.value;
+  if (path === "") return validSharedState(value);
+  if (path === "startDate") return typeof value === "string" && (!value || /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (path === "members") return Array.isArray(value) && value.length > 0 && value.length <= 100 && value.every(n => typeof n === "string" && n.length <= 100);
+  if (path === "meals") return Array.isArray(value) && value.length > 0 && value.length <= 100 && value.every(row => Array.isArray(row) && row.length === 7 && row.every(day => Array.isArray(day) && day.length === 2 && day.every(v => Number.isFinite(Number(v)) && Number(v) >= 0)));
+  if (path === "spend") return Array.isArray(value) && value.length > 0 && value.length <= 100 && value.every(row => row && ["morning", "night", "extra"].every(k => Number.isFinite(Number(row[k])) && Number(row[k]) >= 0));
+  if (/^members\.(?:0|[1-9]\d?)$/.test(path)) return typeof value === "string" && value.length <= 100;
+  if (/^meals\.(?:0|[1-9]\d?)\.[0-6]\.[01]$/.test(path)) return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  if (/^spend\.(?:0|[1-9]\d?)\.(?:morning|night|extra)$/.test(path)) return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return false;
+}
+function rowToEvent(row) {
+  if (!Array.isArray(row) || !row[0] || typeof row[3] !== "string") return null;
+  try {
+    const patch = JSON.parse(row[3]);
+    if (!Array.isArray(patch) || !patch.length || !patch.every(safePatchOperation)) return null;
+    return { id: String(row[0]), device: String(row[2] || ""), patch };
+  } catch (_) { return null; }
+}
+function parseLog(rows) {
+  let remote = null;
+  const events = [];
+  for (const row of (rows || [])) {
+    const event = rowToEvent(row);
+    if (!event) continue;
+    remote = applyOperations(remote, event.patch);
+    events.push(event);
+  }
+  return { remote, events };
+}
+function applyState(next, message) {
+  if (!validSharedState(next)) throw new Error("Firebase returned unexpected tracker data; it wasn't applied.");
+  applyingRemoteState = true;
+  state = {
+    startDate: next.startDate,
+    members: next.members.map(String),
+    meals: next.meals.map(row => row.map(day => [num(day[0]), num(day[1])])),
+    spend: next.spend.map(row => ({ morning: num(row.morning), night: num(row.night), extra: num(row.extra) }))
+  };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+  renderDates(); renderMeals(); renderExpenses(); renderMembers(); renderSummary();
+  applyingRemoteState = false;
+  if (message) setAuthStatus(message, "ok");
+}
+function queueFirebaseSave() {
+  if (!firebaseConnected || !activeGroupId || applyingRemoteState || syncBlockedForConflict) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => syncNow(), 800);
+}
+function showSyncConflict(remoteState, needsPublish = false) {
+  conflictRemoteState = remoteState === null ? null : clone(remoteState);
+  emptyGroupNeedsChoice = false;
+  conflictNeedsPublish = needsPublish;
+  syncBlockedForConflict = true;
+  document.getElementById("conflictTitle").textContent = "Both phones changed the same data.";
+  document.getElementById("conflictText").textContent = "Choose which copy to keep; neither change will be silently overwritten.";
+  document.getElementById("useCloudBtn").textContent = "Use shared copy";
+  document.getElementById("keepLocalBtn").textContent = "Keep this phone's copy";
+  document.getElementById("syncConflict").hidden = false;
+  setAuthStatus("A same-field edit from another phone needs your choice. Your local copy is preserved.", "error");
+}
+async function syncNow() {
+  if (navigator.onLine === false) {
+    setAuthStatus("Offline—not synced. Your data remains saved on this phone; reconnect and tap Sync now.", "error");
+    return;
+  }
+  if (!firebaseConnected) {
+    setAuthStatus("Not synced: connect Google and configure Firebase first. Your data remains on this phone.", "error");
+    return;
+  }
+  if (!activeGroupId) {
+    setAuthStatus("Not synced: choose, create, or join a group first. Your data remains on this phone.", "error");
+    return;
+  }
+  if (isSyncing) { syncAgain = true; return; }
+  isSyncing = true;
+  try {
+    do {
+      syncAgain = false;
+      const response = await nativeFirebaseCall("readEvents", activeGroupId);
+      const parsed = parseLog(response.rows);
+      firebaseReady = true;
+      startFirebaseListener();
+      if (!parsed.remote) {
+        if (keptEmptyGroupId === activeGroupId) {
+          setAuthStatus("This group is still empty. Your tracker remains local; use Submit to Firestore when you want to share it.", "");
+          break;
+        }
+        if (!approvedEmptyGroupSeed) {
+          showEmptyGroupChoice();
+          break;
+        }
+        approvedEmptyGroupSeed = false;
+        const id = "e-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(16).slice(2));
+        const event = { id, time: new Date().toISOString(), device: syncDeviceId, patch: [{ path: "", value: clone(state) }] };
+        pendingEvent = event;
+        await nativeFirebaseCall("appendEvent", activeGroupId, JSON.stringify(event));
+        pendingEvent = null;
+        const updated = await nativeFirebaseCall("readEvents", activeGroupId);
+        const after = parseLog(updated.rows);
+        const competingSeed = after.events.find(e => {
+          if (e.device === syncDeviceId) return false;
+          const seeded = applyOperations(null, e.patch);
+          return validSharedState(seeded) && !equal(seeded, state);
+        });
+        lastSharedState = clone(after.remote || state);
+        lastSeenEventIds = new Set(after.events.map(e => e.id));
+        if (competingSeed) {
+          const otherCopy = applyOperations(null, competingSeed.patch);
+          showSyncConflict(after.remote || otherCopy, true);
+          break;
+        }
+        setAuthStatus("Synced to “" + (currentGroupName() || "this group") + "”. Other members receive updates while online.", "ok");
+        continue;
+      }
+      if (!lastSharedState) {
+        const localDefault = (() => {
+          const saved = clone(state);
+          const defaultMembers = ["Rajibul", "Manoj da", "Ajij", "Sohel da", "Naimul", "Faijul", "Indra"];
+          const blank = { startDate: "2026-09-14", members: defaultMembers,
+            meals: defaultMembers.map(() => DAYS.map(() => [0, 0])),
+            spend: defaultMembers.map(() => ({ morning: 0, night: 0, extra: 0 })) };
+          return equal(saved, blank);
+        })();
+        if (!localDefault && !equal(state, parsed.remote)) {
+          lastSharedState = clone(parsed.remote);
+          lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+          showSyncConflict(parsed.remote);
+          break;
+        }
+        applyState(parsed.remote, "Loaded the shared tracker from Firebase.");
+        lastSharedState = clone(parsed.remote);
+        lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        continue;
+      }
+      const incomingAll = parsed.events.filter(e => !lastSeenEventIds.has(e.id));
+      const ownIncoming = incomingAll.filter(e => e.device === syncDeviceId);
+      const incoming = incomingAll.filter(e => e.device !== syncDeviceId);
+      // If a previous append timed out after reaching Firebase, advance the local baseline to
+      // include that exact event before deciding whether later remote edits conflict.
+      const baseWithOwnWrites = ownIncoming.length
+        ? applyOperations(lastSharedState, ownIncoming.flatMap(e => e.patch))
+        : lastSharedState;
+      const localOps = diffState(baseWithOwnWrites, state);
+      const remoteOps = incoming.flatMap(e => e.patch);
+      if (syncBlockedForConflict) {
+        conflictRemoteState = clone(parsed.remote);
+        lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        break;
+      }
+      if (pendingEvent && parsed.events.some(e => e.id === pendingEvent.id)) pendingEvent = null;
+      const collisions = [];
+      for (const local of localOps) for (const remote of remoteOps) {
+        if (pathsOverlap(local.path, remote.path)) collisions.push(local.path || "whole week");
+      }
+      if (collisions.length) {
+        lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        showSyncConflict(parsed.remote);
+        break;
+      }
+      if (incoming.length || ownIncoming.length) {
+        const merged = applyOperations(parsed.remote, localOps);
+        lastSharedState = clone(parsed.remote);
+        lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        if (!equal(merged, state)) applyState(merged, incoming.length ? "Updated from the Firebase tracker." : "Your previous edit is saved in Firebase.");
+      }
+      if (localOps.length && !pendingEvent) {
+        const event = { id: "e-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(16).slice(2)),
+          time: new Date().toISOString(), device: syncDeviceId, patch: localOps };
+        pendingEvent = event;
+      }
+      if (pendingEvent) {
+        const eventBeingSent = pendingEvent;
+        const stateAtSend = clone(state);
+        const seenBeforeAppend = new Set(lastSeenEventIds);
+        await nativeFirebaseCall("appendEvent", activeGroupId, JSON.stringify(eventBeingSent));
+        if (pendingEvent && pendingEvent.id === eventBeingSent.id) pendingEvent = null;
+        const verify = await nativeFirebaseCall("readEvents", activeGroupId);
+        const saved = parseLog(verify.rows);
+        const externalDuringWrite = saved.events.filter(e => !seenBeforeAppend.has(e.id) && e.device !== syncDeviceId);
+        const sameFieldRace = externalDuringWrite.some(external =>
+          eventBeingSent.patch.some(local => external.patch.some(remote => pathsOverlap(local.path || "", remote.path || ""))));
+        lastSeenEventIds = new Set(saved.events.map(e => e.id));
+        if (saved.remote) lastSharedState = clone(saved.remote);
+        if (sameFieldRace && saved.remote) {
+          showSyncConflict(saved.remote);
+          break;
+        }
+        const changedWhileSending = diffState(stateAtSend, state);
+        if (saved.remote && changedWhileSending.length) {
+          const merged = applyOperations(saved.remote, changedWhileSending);
+          if (!equal(merged, state)) applyState(merged, "Synced with the Firebase tracker; newer edits on this phone are still pending.");
+          queueFirebaseSave();
+        } else if (saved.remote && !equal(state, saved.remote)) {
+          applyState(saved.remote, "Synced with the Firebase tracker.");
+        } else setAuthStatus("Synced with “" + (currentGroupName() || "this group") + "”. Other members receive live updates while online.", "ok");
+      } else if (!incoming.length && !localOps.length) {
+        setAuthStatus("Synced with “" + (currentGroupName() || "this group") + "”. Other members receive live updates while online.", "ok");
+      }
+    } while (syncAgain && firebaseConnected && !syncBlockedForConflict);
+  } catch (error) {
+    const message = error && error.message ? error.message : "Firebase sync failed.";
+    stopFirebaseListener();
+    firebaseReady = false;
+    if (/expired|HTTP 401|HTTP 403|Connect the shared|permission screen/i.test(message)) setDisconnected();
+    setAuthStatus(message + " Your local data is still saved. Tap Sync now or reconnect after fixing access.", "error");
+  } finally {
+    isSyncing = false;
+  }
+}
+function currentGroupName() {
+  const found = groups.find(g => g.id === activeGroupId);
+  return found ? found.name : "";
+}
+function showEmptyGroupChoice() {
+  emptyGroupNeedsChoice = true;
+  syncBlockedForConflict = true;
+  conflictRemoteState = null;
+  document.getElementById("conflictTitle").textContent = "This group has no tracker data yet.";
+  document.getElementById("conflictText").textContent = "Your current entries are still on this phone. Choose whether to keep the group empty or upload this phone’s copy.";
+  document.getElementById("useCloudBtn").textContent = "Keep group empty";
+  document.getElementById("keepLocalBtn").textContent = "Upload this phone’s copy";
+  document.getElementById("syncConflict").hidden = false;
+  setAuthStatus("Not synced yet: choose whether to share this phone’s existing tracker with the new group.", "error");
+}
+function updateGroupControls() {
+  const panel = document.getElementById("groupPanel");
+  if (!panel) return;
+  panel.hidden = !firebaseConnected;
+  const hasGroup = !!activeGroupId && groups.some(g => g.id === activeGroupId);
+  const owner = hasGroup && activeGroupRole === "owner";
+  document.getElementById("syncNowBtn").disabled = !hasGroup;
+  document.getElementById("submitDataBtn").disabled = !firebaseConnected || !hasGroup;
+  document.getElementById("createGroupBtn").disabled = !firebaseConnected;
+  document.getElementById("joinGroupBtn").disabled = !firebaseConnected;
+  document.getElementById("createInviteBtn").disabled = !firebaseConnected || !owner;
+  document.getElementById("ownerInvitePanel").hidden = !owner;
+  document.getElementById("accountLabel").textContent = firebaseConnected
+    ? (googleAccount ? "Connected · " + googleAccount : "Firebase connected") + (hasGroup ? " · " + currentGroupName() : " · choose a group")
+    : "Local only";
+}
+function renderGroupSelect() {
+  const select = document.getElementById("groupSelect");
+  const prior = activeGroupId;
+  select.innerHTML = '<option value="">Choose a group</option>' + groups.map(g =>
+    '<option value="' + esc(g.id) + '">' + esc(g.name) + (g.role === "owner" ? " · owner" : "") + "</option>").join("");
+  if (groups.some(g => g.id === prior)) {
+    select.value = prior;
+    activeGroupRole = (groups.find(g => g.id === prior) || {}).role || "member";
+  } else {
+    activeGroupId = "";
+    activeGroupRole = "";
+    try { localStorage.removeItem("mess-expense-active-group-v1"); } catch (_) {}
+  }
+  updateGroupControls();
+}
+async function refreshInvites() {
+  const box = document.getElementById("inviteList");
+  if (!firebaseConnected || !activeGroupId || activeGroupRole !== "owner") { box.innerHTML = ""; return; }
+  try {
+    const result = await nativeFirebaseCall("listInvites", activeGroupId);
+    box.innerHTML = result.invites.length ? result.invites.map(inv =>
+      '<div class="auth-status">Invite code: <code>' + esc(inv.id) + '</code> · expires ' + new Date(inv.expiresAt).toLocaleString() +
+      ' <button class="ghost shareInviteBtn" data-invite="' + esc(inv.id) + '" data-expires="' + Number(inv.expiresAt) + '">Share</button>' +
+      ' <button class="ghost revokeInviteBtn" data-invite="' + esc(inv.id) + '">Revoke</button></div>').join("") : '<div class="hint">No active invite codes.</div>';
+  } catch (error) { box.textContent = (error && error.message) || "Could not load invite codes."; }
+}
+async function refreshGroups(syncSelected) {
+  if (!firebaseConnected) return;
+  try {
+    const result = await nativeFirebaseCall("listGroups");
+    groups = Array.isArray(result.groups) ? result.groups : [];
+    renderGroupSelect();
+    await refreshInvites();
+    if (activeGroupId) {
+      if (syncSelected) {
+        firebaseReady = false; lastSharedState = null; lastSeenEventIds = new Set(); pendingEvent = null;
+        approvedEmptyGroupSeed = createdGroupIds.has(activeGroupId);
+        stopFirebaseListener();
+        await syncNow();
+      }
+    } else {
+      setAuthStatus(groups.length ? "Choose a group to sync. Your local data stays on this phone." : "No groups yet. Create a group or join with an invite code.", "");
+    }
+  } catch (error) {
+    setAuthStatus((error && error.message) || "Could not load your groups. Your local data remains safe.", "error");
+  }
+}
+async function selectActiveGroup(groupId, shouldSync = true) {
+  const oldId = activeGroupId;
+  if (oldId === groupId) return;
+  stopFirebaseListener();
+  activeGroupId = groupId;
+  const selected = groups.find(g => g.id === groupId);
+  activeGroupRole = selected ? selected.role : "";
+  try {
+    if (groupId) localStorage.setItem("mess-expense-active-group-v1", groupId);
+    else localStorage.removeItem("mess-expense-active-group-v1");
+  } catch (_) {}
+  firebaseReady = false; lastSharedState = null; lastSeenEventIds = new Set(); pendingEvent = null;
+  syncBlockedForConflict = false; emptyGroupNeedsChoice = false; keptEmptyGroupId = "";
+  document.getElementById("syncConflict").hidden = true;
+  renderGroupSelect();
+  await refreshInvites();
+  if (!groupId) { setAuthStatus("Choose a group to sync. Your local data remains on this phone.", ""); return; }
+  approvedEmptyGroupSeed = createdGroupIds.has(groupId);
+  if (shouldSync) await syncNow();
+}
+document.getElementById("groupSelect").addEventListener("change", e => selectActiveGroup(e.target.value));
+document.getElementById("createGroupBtn").addEventListener("click", async () => {
+  const input = document.getElementById("newGroupName");
+  const name = input.value.trim();
+  if (!name) { setAuthStatus("Enter a name for the group first.", "error"); return; }
+  const button = document.getElementById("createGroupBtn"); button.disabled = true;
+  try {
+    const result = await nativeFirebaseCall("createGroup", name);
+    const group = result.group;
+    groups.push(group); createdGroupIds.add(group.id); input.value = "";
+    renderGroupSelect();
+    await selectActiveGroup(group.id, false);
+    approvedEmptyGroupSeed = true;
+    setAuthStatus("Group created. Syncing its tracker now…");
+    await syncNow();
+    await refreshInvites();
+  } catch (error) { setAuthStatus((error && error.message) || "Could not create the group.", "error"); }
+  finally { updateGroupControls(); }
+});
+document.getElementById("joinGroupBtn").addEventListener("click", async () => {
+  const input = document.getElementById("joinCodeInput");
+  const code = input.value.trim();
+  if (!code) { setAuthStatus("Paste the invite code first.", "error"); return; }
+  const button = document.getElementById("joinGroupBtn"); button.disabled = true;
+  try {
+    const result = await nativeFirebaseCall("joinGroup", code);
+    const group = result.group;
+    if (!groups.some(g => g.id === group.id)) groups.push(group);
+    input.value = ""; renderGroupSelect();
+    await selectActiveGroup(group.id, true);
+  } catch (error) { setAuthStatus((error && error.message) || "Could not join the group.", "error"); }
+  finally { updateGroupControls(); }
+});
+document.getElementById("createInviteBtn").addEventListener("click", async () => {
+  const button = document.getElementById("createInviteBtn"); button.disabled = true;
+  try {
+    const result = await nativeFirebaseCall("createInvite", activeGroupId);
+    const status = document.getElementById("inviteStatus");
+    status.textContent = "One-time invite code: " + result.code + " · expires " + new Date(result.expiresAt).toLocaleString() + " ";
+    const share = document.createElement("button");
+    share.type = "button"; share.className = "ghost shareInviteBtn"; share.textContent = "Share";
+    share.dataset.invite = result.code; share.dataset.expires = String(result.expiresAt);
+    status.appendChild(share);
+    await refreshInvites();
+  } catch (error) { document.getElementById("inviteStatus").textContent = (error && error.message) || "Could not create an invite code."; }
+  finally { updateGroupControls(); }
+});
+function shareInviteCode(button) {
+  const code = button && button.dataset.invite;
+  if (!code || !/^[0-9A-F]{32}$/.test(code)) return;
+  const expiry = Number(button.dataset.expires || 0);
+  const text = "Join my “" + (currentGroupName() || "Mess Expense") + "” group in Mess Expense. Sign in, choose Join group, and enter this one-time code: " + code +
+    (expiry ? ". It expires " + new Date(expiry).toLocaleString() + "." : ".");
+  if (window.MessFiles && typeof window.MessFiles.shareText === "function") window.MessFiles.shareText(text);
+  else setAuthStatus("The share menu isn't available on this device. You can copy the invite code shown here.", "error");
+}
+document.getElementById("inviteStatus").addEventListener("click", e => {
+  const button = e.target.closest(".shareInviteBtn"); if (button) shareInviteCode(button);
+});
+document.getElementById("inviteList").addEventListener("click", async e => {
+  const shareButton = e.target.closest(".shareInviteBtn");
+  if (shareButton) { shareInviteCode(shareButton); return; }
+  const button = e.target.closest(".revokeInviteBtn"); if (!button) return;
+  button.disabled = true;
+  try {
+    await nativeFirebaseCall("revokeInvite", activeGroupId, button.dataset.invite);
+    document.getElementById("inviteStatus").textContent = "Invite revoked.";
+    await refreshInvites();
+  } catch (error) { button.disabled = false; document.getElementById("inviteStatus").textContent = (error && error.message) || "Could not revoke that invite."; }
+});
+
+async function connectFirebase() {
+  const button = document.getElementById("connectFirebaseBtn");
+  button.disabled = true;
+  setAuthStatus("Opening Google sign-in…");
+  try {
+    const result = await nativeFirebaseCall("connectTracker");
+    setConnected(result.account || googleAccount);
+    firebaseReady = false;
+    stopFirebaseListener();
+    await refreshGroups(true);
+  } catch (error) {
+    setAuthStatus((error && error.message) || "Firebase connection failed.", "error");
+  } finally { button.disabled = false; }
+}
+document.getElementById("connectFirebaseBtn").addEventListener("click", connectFirebase);
+document.getElementById("syncNowBtn").addEventListener("click", syncNow);
+document.getElementById("submitDataBtn").addEventListener("click", () => {
+  if (keptEmptyGroupId === activeGroupId || emptyGroupNeedsChoice) {
+    keptEmptyGroupId = "";
+    emptyGroupNeedsChoice = false;
+    syncBlockedForConflict = false;
+    approvedEmptyGroupSeed = true;
+    document.getElementById("syncConflict").hidden = true;
+  }
+  syncNow();
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden && firebaseConnected && activeGroupId) syncNow(); });
+window.addEventListener("offline", () => setAuthStatus("Offline—not synced. Your data remains saved on this phone.", "error"));
+window.addEventListener("online", () => { if (firebaseConnected && activeGroupId) setAuthStatus("Back online. Tap Sync now to check the selected group.", ""); });
+document.getElementById("useCloudBtn").addEventListener("click", () => {
+  if (emptyGroupNeedsChoice) {
+    emptyGroupNeedsChoice = false;
+    syncBlockedForConflict = false;
+    approvedEmptyGroupSeed = false;
+    keptEmptyGroupId = activeGroupId;
+    document.getElementById("syncConflict").hidden = true;
+    lastSharedState = null;
+    lastSeenEventIds = new Set();
+    setAuthStatus("The group remains empty. This phone's data is still local; choose Upload this phone's copy to share it.", "ok");
+    return;
+  }
+  if (!conflictRemoteState) return;
+  const copy = clone(conflictRemoteState);
+  const needsPublish = conflictNeedsPublish;
+  conflictNeedsPublish = false;
+  syncBlockedForConflict = false;
+  document.getElementById("syncConflict").hidden = true;
+  lastSharedState = clone(copy);
+  applyState(copy, "Using the selected shared copy.");
+  if (needsPublish) {
+    pendingEvent = { id: "e-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(16).slice(2)),
+      time: new Date().toISOString(), device: syncDeviceId, patch: [{ path: "", value: clone(copy) }] };
+    syncNow();
+  } else queueFirebaseSave();
+});
+document.getElementById("keepLocalBtn").addEventListener("click", async () => {
+  if (emptyGroupNeedsChoice) {
+    emptyGroupNeedsChoice = false;
+    syncBlockedForConflict = false;
+    approvedEmptyGroupSeed = true;
+    keptEmptyGroupId = "";
+    document.getElementById("syncConflict").hidden = true;
+    lastSharedState = null;
+    pendingEvent = null;
+    setAuthStatus("Uploading this phone's tracker to the selected group…");
+    await syncNow();
+    return;
+  }
+  if (!conflictRemoteState) return;
+  conflictNeedsPublish = false;
+  syncBlockedForConflict = false;
+  document.getElementById("syncConflict").hidden = true;
+  const event = { id: "e-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(16).slice(2)),
+    time: new Date().toISOString(), device: syncDeviceId, patch: [{ path: "", value: clone(state) }] };
+  pendingEvent = event;
+  lastSharedState = clone(conflictRemoteState);
+  setAuthStatus("Saving your chosen local copy to Firebase…");
+  await syncNow();
+});
+(async function initFirebaseStatus() {
+  try {
+    const info = await nativeFirebaseCall("getConnectionInfo");
+    if (info.connected) {
+      setConnected(info.account || "");
+      setAuthStatus("Google connected. Loading your groups…");
+      await refreshGroups(true);
+    } else if (info.configured === false) {
+      setAuthStatus("Firebase isn't configured in this build yet. Your data is local only; group sync is unavailable.", "error");
+    }
+  } catch (_) {}
+})();
+
+// ---- Events ----
+document.getElementById("startDate").addEventListener("change", e => {
+  state.startDate = e.target.value;
+  renderDates();
+  saveState();
+
+});
+
+document.getElementById("mealBody").addEventListener("input", e => {
+  const t = e.target; const kind = t.dataset.kind;
+  if (kind !== "lunch" && kind !== "dinner") return;
+  const k = kind === "lunch" ? 0 : 1;
+  state.meals[+t.dataset.i][+t.dataset.d][k] = num(t.value);
+  refreshMeals(); renderSummary(); saveState();
+});
+
+document.getElementById("expenseBody").addEventListener("input", e => {
+  const t = e.target; const f = t.dataset.kind;
+  if (!["morning", "night", "extra"].includes(f)) return;
+  state.spend[+t.dataset.i][f] = num(t.value);
+  refreshExpenses(); renderSummary(); saveState();
+});
+
+document.getElementById("memberList").addEventListener("input", e => {
+  const t = e.target; if (t.dataset.kind !== "name") return;
+  state.members[+t.dataset.i] = t.value;
+  renderMeals(); renderExpenses(); renderSummary(); saveState();
+});
+
+document.getElementById("memberList").addEventListener("click", e => {
+  const t = e.target; if (t.dataset.kind !== "remove") return;
+  if (state.members.length <= 1) return;
+  const i = +t.dataset.i;
+  state.members.splice(i, 1);
+  state.meals.splice(i, 1);
+  state.spend.splice(i, 1);
+  renderAll();
+});
+
+document.getElementById("addMember").addEventListener("click", () => {
+  state.members.push("New member");
+  state.meals.push(blankMeals());
+  state.spend.push({ morning: 0, night: 0, extra: 0 });
+  renderAll();
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (!confirm("Clear all meal counts and expenses for this week? Names and the date are kept.")) return;
+  state.meals = state.members.map(blankMeals);
+  state.spend = state.members.map(() => ({ morning: 0, night: 0, extra: 0 }));
+  renderAll();
+});
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  if (!window.MessFiles || typeof window.MessFiles.exportXlsx !== "function") {
+    setAuthStatus("Excel backup save is available in the Android app.", "error");
+    return;
+  }
+  window.MessFiles.exportXlsx(JSON.stringify(state));
+});
+
+document.getElementById("importBtn").addEventListener("click", () => {
+  if (!window.MessFiles || typeof window.MessFiles.importXlsx !== "function") {
+    setAuthStatus("Excel backup import is available in the Android app.", "error");
+    return;
+  }
+  window.MessFiles.importXlsx();
+});
+
+window.onNativeBackupMessage = (message, ok) => setAuthStatus(message || "Excel backup operation finished.", ok ? "ok" : "error");
+window.onXlsxImportReady = jsonText => {
+  try {
+    const imported = JSON.parse(jsonText);
+    if (!validSharedState(imported)) throw new Error("The workbook data is incomplete or outside the supported range.");
+    const prompt = `Replace this device's current tracker with the imported ${imported.members.length}-member workbook for week starting ${imported.startDate || "(date not set)"}?`;
+    if (!confirm(prompt)) { setAuthStatus("Import cancelled. Current tracker was kept."); return; }
+    state = {
+      startDate: imported.startDate,
+      members: imported.members.map(String),
+      meals: imported.meals.map(row => row.map(day => [Number(day[0]), Number(day[1])])),
+      spend: imported.spend.map(row => ({ morning: Number(row.morning), night: Number(row.night), extra: Number(row.extra) }))
+    };
+    renderAll();
+    setAuthStatus("Excel backup imported. The current tracker was replaced.", "ok");
+  } catch (error) {
+    alert("That .xlsx file is not a valid Mess Expense backup. Your current tracker was kept.");
+  }
+};
+
+if (!loadSavedState()) freshState();
+renderAll();
+
+</script>
+</body>
+</html>

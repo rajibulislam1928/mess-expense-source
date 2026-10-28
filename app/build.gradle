@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The app remains buildable for local UI checks before the owner supplies project config.
+if (file('google-services.json').isFile()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
+android {
+    namespace 'com.messexpense.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.messexpense.app"
+        minSdk 23
+        targetSdk 34
+        versionCode 9
+        versionName "1.3.6"
+    }
+
+    signingConfigs {
+        release {
+            def keyFile = System.getenv("MESS_KEYSTORE_FILE")
+            if (keyFile) {
+                storeFile file(keyFile)
+                storePassword System.getenv("MESS_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MESS_KEY_ALIAS")
+                keyPassword System.getenv("MESS_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "com.google.android.gms:play-services-auth:21.5.1"
+    implementation platform("com.google.firebase:firebase-bom:33.7.0")
+    implementation "com.google.firebase:firebase-auth"
+    implementation "com.google.firebase:firebase-firestore"
+}

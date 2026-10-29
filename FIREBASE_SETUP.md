@@ -8,7 +8,7 @@ Mess Expense stores its tracker locally first, then syncs the selected group thr
 2. Enable Google sign-in under Authentication. Download the Firebase Android `google-services.json` for that exact package after registering the Android app.
 3. Create a Cloud Firestore database. In Firebase Console → Firestore Database → Rules, paste the complete contents of `firebase/firestore.rules.example` and click **Publish**. These rules define the group membership boundary, restrict invite operations, and deny other access by default. Do not replace them with rules that allow all authenticated users.
 4. Add the debug signing certificate SHA-1 for the APK you intend to test to the Firebase Android app's fingerprint settings, then ensure Google OAuth has the corresponding client. A separately signed release needs its own certificate fingerprint.
-5. Place `google-services.json` at `app/google-services.json` in the private source tree before building. The Google Services plugin is only applied when this file exists. Never publish the configuration file in the APK-only public repository, and never put service-account JSON, OAuth client secrets, keystores, signing passwords, or Google passwords in the Android client.
+5. Place `google-services.json` at `app/google-services.json` in the private source tree before building. The Google Services plugin is only applied when this file exists. Do not commit the configuration file to this public source repository, and never put service-account JSON, OAuth client secrets, keystores, signing passwords, or Google passwords in the Android client.
 
 ## In-app setup and use
 

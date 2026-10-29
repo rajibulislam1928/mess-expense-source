@@ -310,7 +310,7 @@
 
 <script>
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DEFAULT_MEMBERS = ["Rajibul", "Manoj da", "Ajij", "Sohel da", "Naimul", "Faijul", "Indra"];
+const DEFAULT_MEMBERS = ["Rajibul", "Naimul", "Subho", "Jayraj", "Akash", "Debanjon"];
 
 // meals[i][d] = [lunch, dinner]; spend[i] = {morning, night, extra}
 let state = { startDate: "", members: [], meals: [], spend: [] };
@@ -521,6 +521,7 @@ let activeGroupRole = "";
 let approvedEmptyGroupSeed = false;
 const createdGroupIds = new Set();
 let emptyGroupNeedsChoice = false;
+let keptEmptyGroupId = "";
 const callbackPromises = new Map();
 const DEVICE_KEY = "mess-expense-sync-device-v1";
 function getDeviceId() {

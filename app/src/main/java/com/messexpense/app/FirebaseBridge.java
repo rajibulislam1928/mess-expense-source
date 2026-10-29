@@ -438,12 +438,15 @@ public final class FirebaseBridge {
     private JSONArray toJsonArray(Object value) throws JSONException {
         if (!(value instanceof List)) return new JSONArray();
         JSONArray array = new JSONArray();
-        for (Object item : (List<?>) value) {
-            if (item instanceof Map) array.put(new JSONObject((Map<?, ?>) item));
-            else if (item instanceof List) array.put(toJsonArray(item));
-            else array.put(item);
-        }
+        for (Object item : (List<?>) value) array.put(toJsonValue(item));
         return array;
+    }
+
+    private Object toJsonValue(Object raw) throws JSONException {
+        Object value = FirestoreArrayCodec.decode(raw);
+        if (value instanceof List<?>) return new JSONArray((java.util.Collection<?>) value);
+        if (value instanceof Map<?, ?>) return new JSONObject((Map<?, ?>) value);
+        return value == null ? JSONObject.NULL : value;
     }
 
     private List<Object> toNativeList(JSONArray array) throws JSONException {
@@ -451,7 +454,7 @@ public final class FirebaseBridge {
         for (int i = 0; i < array.length(); i++) {
             Object item = array.get(i);
             if (item instanceof JSONObject) values.add(toNativeMap((JSONObject) item));
-            else if (item instanceof JSONArray) values.add(toNativeList((JSONArray) item));
+            else if (item instanceof JSONArray) values.add(FirestoreArrayCodec.encode(toNativeList((JSONArray) item)));
             else values.add(item == JSONObject.NULL ? null : item);
         }
         return values;
@@ -464,7 +467,7 @@ public final class FirebaseBridge {
             String key = keys.next();
             Object item = object.get(key);
             if (item instanceof JSONObject) values.put(key, toNativeMap((JSONObject) item));
-            else if (item instanceof JSONArray) values.put(key, toNativeList((JSONArray) item));
+            else if (item instanceof JSONArray) values.put(key, FirestoreArrayCodec.encode(toNativeList((JSONArray) item)));
             else values.put(key, item == JSONObject.NULL ? null : item);
         }
         return values;

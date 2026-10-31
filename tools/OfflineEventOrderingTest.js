@@ -64,6 +64,63 @@ if (!applyActiveTrackedDraft(reorderedMeals, mealDraft) || reorderedMeals.meals[
   throw new Error('A remote member reorder must preserve the focused meal draft too');
 if (captureActiveTrackedDraft(validState, { type: 'text', dataset: { kind: 'name', i: '0' }, value: 'A' }) !== null)
   throw new Error('Only focused meal/expense number fields are draft-preserved');
+// A same-roster refresh must update cells in place and leave the focused editor node/value intact.
+const liveMealInput = { type: 'number', dataset: { kind: 'dinner', i: '0', d: '3' }, value: '7' };
+const otherMealInput = { type: 'number', dataset: { kind: 'lunch', i: '0', d: '3' }, value: '0' };
+const otherExpenseInput = { type: 'number', dataset: { kind: 'morning', i: '0' }, value: '0' };
+context.document = { querySelectorAll: () => [liveMealInput, otherMealInput, otherExpenseInput], activeElement: liveMealInput };
+const remoteWithChanges = JSON.parse(JSON.stringify(validState));
+remoteWithChanges.meals[0][3][0] = 4;
+remoteWithChanges.spend[0].morning = 50;
+if (!applyActiveTrackedDraft(remoteWithChanges, mealDraft)) throw new Error('Live meal draft should apply to refreshed state');
+context.updateTrackedInputsFromState(remoteWithChanges, mealDraft);
+if (liveMealInput.value !== '7') throw new Error('In-place refresh must not replace or clear the active meal editor value');
+if (otherMealInput.value !== 4 || otherExpenseInput.value !== 50)
+  throw new Error('In-place refresh must still update other meal and expense cells');
+
+// Exercise the actual applyState branch: same-roster sync must not rebuild the table nodes.
+const applyStart = html.indexOf('function applyState(next, message) {');
+if (applyStart < 0) throw new Error('Could not locate production applyState');
+let depth = 0, applyEnd = -1, opened = false;
+for (let i = html.indexOf('{', applyStart); i < html.length; i++) {
+  if (html[i] === '{') { depth++; opened = true; }
+  else if (html[i] === '}' && opened && --depth === 0) { applyEnd = i + 1; break; }
+}
+if (applyEnd < 0) throw new Error('Could not extract production applyState');
+vm.runInContext(html.slice(applyStart, applyEnd), context);
+context.state = JSON.parse(JSON.stringify(validState));
+context.validSharedState = () => true;
+context.num = value => Number(value) || 0;
+context.localStorage = { setItem: () => {} };
+context.STORAGE_KEY = 'test';
+context.renderDates = () => {};
+context.refreshMeals = () => {};
+context.refreshExpenses = () => {};
+context.renderMembers = () => {};
+context.renderSummary = () => {};
+context.renderMeals = () => { throw new Error('Same-roster sync replaced the meal table'); };
+context.renderExpenses = () => { throw new Error('Same-roster sync replaced the expense table'); };
+context.queueFirebaseSave = () => {};
+context.setAuthStatus = () => {};
+context.applyingRemoteState = false;
+context.activeTrackedDraft = null;
+context.document.activeElement = liveMealInput;
+liveMealInput.value = '7';
+context.applyState(remoteWithChanges, null);
+if (liveMealInput.value !== '7' || context.state.meals[0][3][1] !== 7)
+  throw new Error('Production applyState must preserve the actively edited meal value during sync');
+if (otherMealInput.value !== 4 || otherExpenseInput.value !== 50)
+  throw new Error('Production applyState must apply remote values to other table cells');
+const liveExpenseInput = { type: 'number', dataset: { kind: 'morning', i: '0' }, value: '325.5' };
+context.state = JSON.parse(JSON.stringify(validState));
+context.activeTrackedDraft = null;
+context.document.activeElement = liveExpenseInput;
+context.document.querySelectorAll = () => [liveExpenseInput, otherMealInput];
+const remoteExpense = JSON.parse(JSON.stringify(validState));
+remoteExpense.spend[0].morning = 12;
+context.applyState(remoteExpense, null);
+if (liveExpenseInput.value !== '325.5' || context.state.spend[0].morning !== 325.5)
+  throw new Error('Production applyState must preserve the actively edited expense value during sync');
 
 const row = rowToEvent(['newer', newer.time, newer.device, JSON.stringify(newer.patch), 2000]);
 if (!row || row.serverTime !== 2000) throw new Error('FirebaseBridge serverTime column must parse');

@@ -602,6 +602,7 @@ let saveTimer = null;
 let isSyncing = false;
 let syncAgain = false;
 let applyingRemoteState = false;
+let activeTrackedDraft = null;
 let lastSharedState = null;
 let lastSeenEventIds = new Set();
 let pendingEvent = null;
@@ -788,6 +789,28 @@ function restoreActiveTrackedDraftFocus(draft) {
   replacement.value = draft.inputValue;
   replacement.focus({ preventScroll: true });
 }
+function updateTrackedInputsFromState(nextState, focusDraft) {
+  const focusedIndex = focusDraft ? activeTrackedDraftIndex(nextState, focusDraft) : -1;
+  for (const input of document.querySelectorAll("#mealBody input[data-kind], #expenseBody input[data-kind]")) {
+    const index = Number(input.dataset.i);
+    if (!Number.isInteger(index) || index < 0 || index >= nextState.members.length) continue;
+    const kind = input.dataset.kind;
+    const isFocusedDraft = focusDraft && index === focusedIndex && kind === focusDraft.kind &&
+      (focusDraft.day === null || Number(input.dataset.d) === focusDraft.day);
+    if (isFocusedDraft || input === document.activeElement) continue;
+    if (kind === "lunch" || kind === "dinner") {
+      const day = Number(input.dataset.d);
+      const slot = kind === "dinner" ? 1 : 0;
+      if (Number.isInteger(day) && nextState.meals[index]?.[day]) input.value = nextState.meals[index][day][slot];
+    } else if (["morning", "night", "extra"].includes(kind) && nextState.spend[index]) {
+      input.value = nextState.spend[index][kind];
+    }
+  }
+}
+function rememberTrackedDraft(input) {
+  const draft = captureActiveTrackedDraft(state, input);
+  if (draft) activeTrackedDraft = draft;
+}
 function refreshPendingEvent(event, localOps, currentState) {
   if (!event) return null;
   let patch = Array.isArray(localOps) && localOps.length ? clone(localOps) : [];
@@ -904,7 +927,10 @@ function stopBackgroundSync() {
 }
 function applyState(next, message) {
   if (!validSharedState(next)) throw new Error("Firebase returned unexpected tracker data; it wasn't applied.");
-  const activeDraft = captureActiveTrackedDraft(state, document.activeElement);
+  const previousMembers = state.members.slice();
+  const focusedDraft = captureActiveTrackedDraft(state, document.activeElement);
+  const activeDraft = focusedDraft || activeTrackedDraft;
+  const sameRoster = equal(previousMembers, next.members.map(String));
   applyingRemoteState = true;
   state = {
     startDate: next.startDate,
@@ -914,7 +940,15 @@ function applyState(next, message) {
   };
   const keptDraft = applyActiveTrackedDraft(state, activeDraft);
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
-  renderDates(); renderMeals(activeDraft); renderExpenses(activeDraft); renderMembers(); renderSummary();
+  renderDates();
+  if (sameRoster) {
+    // Do not replace the editable table nodes during a live sync. Replacing a focused
+    // WebView number input can discard Android's in-progress text before its input event.
+    updateTrackedInputsFromState(state, activeDraft);
+    refreshMeals(); refreshExpenses(); renderMembers(); renderSummary();
+  } else {
+    renderMeals(activeDraft); renderExpenses(activeDraft); renderMembers(); renderSummary();
+  }
   applyingRemoteState = false;
   if (keptDraft) queueFirebaseSave();
   if (message) setAuthStatus(message, "ok");
@@ -1418,6 +1452,13 @@ drawerScrim.addEventListener("click", () => setDrawerOpen(false));
 document.addEventListener("keydown", event => { if (event.key === "Escape" && !navigationDrawer.hidden) setDrawerOpen(false); });
 
 // ---- Events ----
+document.addEventListener("focusin", e => rememberTrackedDraft(e.target));
+document.addEventListener("focusout", e => {
+  if (!captureActiveTrackedDraft(state, e.target)) return;
+  setTimeout(() => {
+    if (!captureActiveTrackedDraft(state, document.activeElement)) activeTrackedDraft = null;
+  }, 0);
+});
 document.getElementById("startDate").addEventListener("change", e => {
   state.startDate = e.target.value;
   renderDates();
@@ -1432,6 +1473,7 @@ document.getElementById("mealBody").addEventListener("input", e => {
   const i = +t.dataset.i, d = +t.dataset.d;
   clearNewMarker(itemMarkerKey("meal", state.members[i], d, k), t);
   state.meals[i][d][k] = num(t.value);
+  rememberTrackedDraft(t);
   refreshMeals(); renderSummary(); saveState();
 });
 
@@ -1441,6 +1483,7 @@ document.getElementById("expenseBody").addEventListener("input", e => {
   const i = +t.dataset.i;
   clearNewMarker(itemMarkerKey("expense", state.members[i], f), t);
   state.spend[i][f] = num(t.value);
+  rememberTrackedDraft(t);
   refreshExpenses(); renderSummary(); saveState();
 });
 

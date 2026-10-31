@@ -53,13 +53,14 @@ service cloud.firestore {
       match /events/{eventId} {
         allow get, list: if member(groupId);
         allow create: if member(groupId)
-          && request.resource.data.keys().hasOnly(['id', 'time', 'device', 'patch'])
-          && request.resource.data.keys().hasAll(['id', 'time', 'device', 'patch'])
+          && request.resource.data.keys().hasOnly(['id', 'time', 'device', 'patch', 'serverTime'])
+          && request.resource.data.keys().hasAll(['id', 'time', 'device', 'patch', 'serverTime'])
           && request.resource.data.id == eventId
           && request.resource.data.time is string
           && request.resource.data.device is string
           && request.resource.data.patch is list
-          && request.resource.data.patch.size() > 0;
+          && request.resource.data.patch.size() > 0
+          && request.resource.data.serverTime is timestamp;
         allow update, delete: if false;
       }
     }

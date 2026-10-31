@@ -178,6 +178,8 @@ public final class FirebaseBridge {
                     row.put(doc.getString("time"));
                     row.put(doc.getString("device"));
                     row.put(patchArray.toString());
+                    com.google.firebase.Timestamp serverTime = doc.getTimestamp("serverTime");
+                    row.put(serverTime == null ? JSONObject.NULL : serverTime.toDate().getTime());
                     rows.put(row);
                 }
                 callback(callbackId, success("\"rows\":" + rows));
@@ -207,6 +209,7 @@ public final class FirebaseBridge {
             data.put("time", time);
             data.put("device", device);
             data.put("patch", toNativeList(patch));
+            data.put("serverTime", com.google.firebase.firestore.FieldValue.serverTimestamp());
             events(groupId).document(id).set(data).addOnSuccessListener(activity, unused -> callback(callbackId, success("")))
                     .addOnFailureListener(activity, e -> callback(callbackId, error(firebaseError(e))));
         } catch (Exception e) {
@@ -227,6 +230,12 @@ public final class FirebaseBridge {
                 result.put("baselineState", new JSONObject(prefs.getString(BackgroundSyncWorker.KEY_SYNC_BASE_STATE, "{}")));
                 result.put("localState", new JSONObject(prefs.getString(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE, "{}")));
                 result.put("seenEventIds", new JSONArray(prefs.getString(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS, "[]")));
+                String pendingBase = prefs.getString(BackgroundSyncWorker.KEY_PENDING_BASELINE_STATE, "");
+                String pendingRemote = prefs.getString(BackgroundSyncWorker.KEY_PENDING_REMOTE_STATE, "");
+                if (!pendingBase.isEmpty() && !pendingRemote.isEmpty()) {
+                    result.put("pendingBaselineState", new JSONObject(pendingBase));
+                    result.put("pendingRemoteState", new JSONObject(pendingRemote));
+                }
                 return result.toString();
             } catch (Exception ignored) { return "{}"; }
         }
@@ -363,6 +372,8 @@ public final class FirebaseBridge {
                     .putString(BackgroundSyncWorker.KEY_SYNC_BASE_STATE, baseline.toString())
                     .putString(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE, local.toString())
                     .putString(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS, syncIds.toString())
+                    .remove(BackgroundSyncWorker.KEY_PENDING_BASELINE_STATE)
+                    .remove(BackgroundSyncWorker.KEY_PENDING_REMOTE_STATE)
                     .commit();
             }
             Constraints constraints = new Constraints.Builder()
@@ -394,6 +405,8 @@ public final class FirebaseBridge {
                     .remove(BackgroundSyncWorker.KEY_SYNC_BASE_STATE)
                     .remove(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE)
                     .remove(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS)
+                    .remove(BackgroundSyncWorker.KEY_PENDING_BASELINE_STATE)
+                    .remove(BackgroundSyncWorker.KEY_PENDING_REMOTE_STATE)
                     .commit();
         }
     }

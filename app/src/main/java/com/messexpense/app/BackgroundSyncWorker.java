@@ -42,6 +42,8 @@ public final class BackgroundSyncWorker extends Worker {
     static final String KEY_SYNC_BASE_STATE = "sync_base_state";
     static final String KEY_SYNC_LOCAL_STATE = "sync_local_state";
     static final String KEY_SYNC_EVENT_IDS = "sync_event_ids";
+    static final String KEY_PENDING_BASELINE_STATE = "pending_baseline_state";
+    static final String KEY_PENDING_REMOTE_STATE = "pending_remote_state";
     static final String KEY_UI_ACTIVE_AT = "ui_active_at";
     static final String KEY_LAST_ATTEMPT = "last_background_attempt_ms";
     static final String KEY_LAST_SUCCESS = "last_background_success_ms";
@@ -85,7 +87,7 @@ public final class BackgroundSyncWorker extends Worker {
             if (auth.getCurrentUser() == null) return Result.success();
             FirebaseFirestore firestore = FirebaseFirestore.getInstance(app);
             QuerySnapshot snapshot = Tasks.await(
-                    firestore.collection("groups").document(groupId).collection("events").orderBy("time").get(),
+                    firestore.collection("groups").document(groupId).collection("events").get(),
                     25, TimeUnit.SECONDS);
             if (isStopped()) return Result.success();
 
@@ -95,6 +97,8 @@ public final class BackgroundSyncWorker extends Worker {
             JSONArray allEvents = new JSONArray();
             JSONArray externalPatches = new JSONArray();
             JSONArray ownPatches = new JSONArray();
+            java.util.List<JSONObject> allParsedEvents = new java.util.ArrayList<>();
+            java.util.List<JSONObject> unseenExternalEvents = new java.util.ArrayList<>();
             Set<String> allIds = new HashSet<>();
 
             String seenTime;
@@ -123,12 +127,15 @@ public final class BackgroundSyncWorker extends Worker {
                 JSONArray patch = toJsonArray((java.util.List<?>) decodedPatch);
                 if (patch.length() == 0 || !validPatch(patch)) continue;
                 JSONObject event = new JSONObject();
+                com.google.firebase.Timestamp serverTimestamp = document.getTimestamp("serverTime");
                 event.put("id", id); event.put("time", time); event.put("device", device); event.put("patch", patch);
+                event.put("serverTime", serverTimestamp == null ? JSONObject.NULL : serverTimestamp.toDate().getTime());
                 allEvents.put(event);
+                allParsedEvents.add(event);
                 allIds.add(id);
                 if (!syncSeenIds.contains(id)) {
                     if (device.equals(deviceId)) ownPatches.put(patch);
-                    else externalPatches.put(patch);
+                    else { externalPatches.put(patch); unseenExternalEvents.add(event); }
                 }
 
                 if (time.compareTo(newestTime) > 0) { newestTime = time; newestIds.clear(); }
@@ -152,12 +159,13 @@ public final class BackgroundSyncWorker extends Worker {
                 }
             }
 
+            sortEvents(allEvents);
             JSONObject remote = replay(allEvents);
             if (remote == null || !validState(remote)) return Result.success();
             JSONObject baseWithOwn = applyPatches(baseline, ownPatches);
             JSONArray localOps = diff(baseWithOwn, local);
             JSONArray remoteOps = flattenPatches(externalPatches);
-            boolean collision = overlaps(localOps, remoteOps);
+            boolean collision = overlaps(localOps, remoteOps) || (!unseenExternalEvents.isEmpty() && hasAmbiguousEventOverwrite(allParsedEvents));
             JSONObject merged = null;
             if (!collision && externalPatches.length() > 0) {
                 merged = applyOperations(remote, localOps);
@@ -179,6 +187,12 @@ public final class BackgroundSyncWorker extends Worker {
                     // Keep foreground sync's conflict baseline, but advance durable local state and
                     // baseline together so reopened UI sees remote changes plus local pending edits.
                     if (jsonSize(remote) > MAX_STORED_STATE_CHARS || jsonSize(merged) > MAX_STORED_STATE_CHARS) return Result.success();
+                    String pendingBase = prefs.getString(KEY_PENDING_BASELINE_STATE, "");
+                    String pendingRemote = prefs.getString(KEY_PENDING_REMOTE_STATE, "");
+                    JSONObject remoteOnlyBase = pendingRemote.isEmpty() ? baseline : new JSONObject(pendingRemote);
+                    JSONObject remoteOnly = applyPatches(remoteOnlyBase, externalPatches);
+                    if (pendingBase.isEmpty()) edit.putString(KEY_PENDING_BASELINE_STATE, baseline.toString());
+                    if (externalPatches.length() > 0) edit.putString(KEY_PENDING_REMOTE_STATE, remoteOnly.toString());
                     edit.putString(KEY_SYNC_BASE_STATE, remote.toString())
                             .putString(KEY_SYNC_LOCAL_STATE, merged.toString())
                             .putString(KEY_SYNC_EVENT_IDS, toJson(allIds));
@@ -222,6 +236,27 @@ public final class BackgroundSyncWorker extends Worker {
         }
         if (value instanceof java.util.List) return toJsonArray((java.util.List<?>) value);
         return value == null ? JSONObject.NULL : value;
+    }
+
+    private static void sortEvents(JSONArray events) throws JSONException {
+        java.util.List<JSONObject> ordered = new java.util.ArrayList<>();
+        for (int i = 0; i < events.length(); i++) ordered.add(events.getJSONObject(i));
+        ordered.sort((a, b) -> {
+            double ta = a.optDouble("serverTime", Double.NaN);
+            double tb = b.optDouble("serverTime", Double.NaN);
+            boolean aReliable = Double.isFinite(ta), bReliable = Double.isFinite(tb);
+            if (aReliable != bReliable) return aReliable ? -1 : 1;
+            if (aReliable) {
+                int byServerTime = Double.compare(ta, tb);
+                return byServerTime != 0 ? byServerTime : a.optString("id", "").compareTo(b.optString("id", ""));
+            }
+            String ca = a.optString("time", ""), cb = b.optString("time", "");
+            int byClientTime = ca.compareTo(cb);
+            return byClientTime != 0 ? byClientTime : a.optString("id", "").compareTo(b.optString("id", ""));
+        });
+        JSONArray sorted = new JSONArray();
+        for (JSONObject event : ordered) sorted.put(event);
+        for (int i = 0; i < sorted.length(); i++) events.put(i, sorted.get(i));
     }
 
     private static JSONObject replay(JSONArray events) throws JSONException {
@@ -302,6 +337,24 @@ public final class BackgroundSyncWorker extends Worker {
 
     private static void addOperation(JSONArray out, String path, Object value) throws JSONException {
         out.put(new JSONObject().put("path", path).put("value", cloneJson(value)));
+    }
+
+    private static boolean hasAmbiguousEventOverwrite(java.util.List<JSONObject> events) throws JSONException {
+        for (int i = 0; i < events.size(); i++) for (int j = i + 1; j < events.size(); j++) {
+            JSONObject left = events.get(i), right = events.get(j);
+            JSONArray a = left.getJSONArray("patch"), b = right.getJSONArray("patch");
+            boolean overlap = false;
+            for (int x = 0; x < a.length() && !overlap; x++) for (int y = 0; y < b.length(); y++) {
+                if (pathsOverlap(a.getJSONObject(x).optString("path", ""), b.getJSONObject(y).optString("path", ""))) {
+                    overlap = true; break;
+                }
+            }
+            if (!overlap) continue;
+            double leftTime = left.optDouble("serverTime", Double.NaN);
+            double rightTime = right.optDouble("serverTime", Double.NaN);
+            if (!Double.isFinite(leftTime) || !Double.isFinite(rightTime) || leftTime == rightTime) return true;
+        }
+        return false;
     }
 
     private static boolean overlaps(JSONArray localOps, JSONArray remoteOps) throws JSONException {

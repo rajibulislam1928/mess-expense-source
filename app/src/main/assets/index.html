@@ -87,6 +87,9 @@
   th.name { background: var(--card); }
   tbody tr:hover td.name { background: var(--soft); }
   .sep { border-left: 2px solid var(--line); }
+  .tracked-cell { display: flex; align-items: center; gap: 4px; min-width: 76px; }
+  .tracked-cell input { flex: 1; min-width: 50px; }
+  .new-marker { display: inline-block; padding: 2px 5px; border-radius: 999px; background: #fff0c2; color: #7a4e00; font-size: 10px; font-weight: 800; line-height: 1.2; }
   .avatar {
     display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
     background: linear-gradient(135deg, var(--brand-2), var(--accent)); color: #fff; font-size: 12px; font-weight: 700;
@@ -360,6 +363,42 @@ const num = v => (isFinite(parseFloat(v)) ? Math.max(0, parseFloat(v)) : 0);
 const fmt = n => (Math.round(n * 100) / 100).toFixed(2);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const STORAGE_KEY = "mess-expense-state-v1";
+const NEW_ITEMS_KEY = "mess-expense-new-items-v1";
+let newItems = new Set();
+try { newItems = new Set(JSON.parse(localStorage.getItem(NEW_ITEMS_KEY) || "[]").map(String)); } catch (_) {}
+function itemMarkerKey(kind, name, dayOrField, slot = "") {
+  return [String(activeGroupId || "local"), kind, encodeURIComponent(String(name)), dayOrField, slot].join(":");
+}
+function renderNewMarker(key) {
+  return newItems.has(key) ? '<span class="new-marker" aria-label="New">New</span>' : "";
+}
+function rememberNewItems() {
+  try { localStorage.setItem(NEW_ITEMS_KEY, JSON.stringify(Array.from(newItems))); } catch (_) {}
+}
+function clearNewMarker(key, input) {
+  if (!newItems.delete(key)) return;
+  rememberNewItems();
+  const badge = input.closest(".tracked-cell")?.querySelector(".new-marker");
+  if (badge) badge.remove();
+}
+function markNewEntries(before, after) {
+  if (!validSharedState(before) || !validSharedState(after)) return;
+  const oldIndexByName = new Map(before.members.map((name, i) => [name, i]));
+  after.members.forEach((name, i) => {
+    const oldIndex = oldIndexByName.has(name) ? oldIndexByName.get(name) : -1;
+    for (let d = 0; d < 7; d++) for (let slot = 0; slot < 2; slot++) {
+      const value = Number(after.meals[i][d][slot] || 0);
+      const previous = oldIndex < 0 ? 0 : Number(before.meals[oldIndex]?.[d]?.[slot] || 0);
+      if (value > 0 && previous <= 0) newItems.add(itemMarkerKey("meal", name, d, slot));
+    }
+    for (const field of ["morning", "night", "extra"]) {
+      const value = Number(after.spend[i][field] || 0);
+      const previous = oldIndex < 0 ? 0 : Number(before.spend[oldIndex]?.[field] || 0);
+      if (value > 0 && previous <= 0) newItems.add(itemMarkerKey("expense", name, field));
+    }
+  });
+  rememberNewItems();
+}
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
@@ -398,6 +437,7 @@ function loadSavedState() {
     if (backgroundSnapshot) {
       lastSharedState = clone(backgroundSnapshot.baselineState);
       lastSeenEventIds = new Set(Array.isArray(backgroundSnapshot.seenEventIds) ? backgroundSnapshot.seenEventIds.map(String) : []);
+      if (validSharedState(backgroundSnapshot.pendingBaselineState) && validSharedState(backgroundSnapshot.pendingRemoteState)) markNewEntries(backgroundSnapshot.pendingBaselineState, backgroundSnapshot.pendingRemoteState);
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
     }
     return state.members.length > 0;
@@ -449,8 +489,8 @@ function renderDates() {
 function renderMeals() {
   document.getElementById("mealBody").innerHTML = state.members.map((name, i) => {
     const cells = DAYS.map((_, d) => `
-      <td class="sep"><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][0]}" data-kind="lunch" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} lunch"></td>
-      <td><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][1]}" data-kind="dinner" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} dinner"></td>`).join("");
+      <td class="sep"><div class="tracked-cell"><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][0]}" data-kind="lunch" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} lunch">${renderNewMarker(itemMarkerKey("meal", name, d, 0))}</div></td>
+      <td><div class="tracked-cell"><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][1]}" data-kind="dinner" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} dinner">${renderNewMarker(itemMarkerKey("meal", name, d, 1))}</div></td>`).join("");
     const total = state.meals[i].reduce((s, day) => s + day[0] + day[1], 0);
     return `<tr><td class="name"><span class="avatar">${esc(initial(name))}</span>${esc(name)}</td>${cells}<td class="sep"><span class="total-pill" data-mt="${i}">${total}</span></td></tr>`;
   }).join("");
@@ -473,9 +513,9 @@ function renderExpenses() {
     const total = s.morning + s.night + s.extra;
     return `<tr>
       <td class="name"><span class="avatar">${esc(initial(name))}</span>${esc(name)}</td>
-      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.morning}" data-kind="morning" data-i="${i}" aria-label="${esc(name)} morning"></td>
-      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.night}" data-kind="night" data-i="${i}" aria-label="${esc(name)} night"></td>
-      <td><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.extra}" data-kind="extra" data-i="${i}" aria-label="${esc(name)} extra"></td>
+      <td><div class="tracked-cell"><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.morning}" data-kind="morning" data-i="${i}" aria-label="${esc(name)} morning">${renderNewMarker(itemMarkerKey("expense", name, "morning"))}</div></td>
+      <td><div class="tracked-cell"><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.night}" data-kind="night" data-i="${i}" aria-label="${esc(name)} night">${renderNewMarker(itemMarkerKey("expense", name, "night"))}</div></td>
+      <td><div class="tracked-cell"><input type="number" min="0" step="0.01" inputmode="decimal" value="${s.extra}" data-kind="extra" data-i="${i}" aria-label="${esc(name)} extra">${renderNewMarker(itemMarkerKey("expense", name, "extra"))}</div></td>
       <td><span class="total-pill" data-et="${i}">${fmt(total)}</span></td>
     </tr>`;
   }).join("");
@@ -744,19 +784,31 @@ function rowToEvent(row) {
   try {
     const patch = JSON.parse(row[3]);
     if (!Array.isArray(patch) || !patch.length || !patch.every(safePatchOperation)) return null;
-    return { id: String(row[0]), time: String(row[1] || ""), device: String(row[2] || ""), patch };
+    const serverTime = typeof row[4] === "number" && Number.isFinite(row[4]) ? row[4] : null;
+    return { id: String(row[0]), time: String(row[1] || ""), serverTime, device: String(row[2] || ""), patch };
   } catch (_) { return null; }
+}
+function compareEvents(a, b) {
+  const aReliable = Number.isFinite(a.serverTime), bReliable = Number.isFinite(b.serverTime);
+  if (aReliable !== bReliable) return aReliable ? -1 : 1;
+  if (aReliable) return a.serverTime - b.serverTime || a.id.localeCompare(b.id);
+  return (Date.parse(a.time) || 0) - (Date.parse(b.time) || 0) || a.id.localeCompare(b.id);
 }
 function parseLog(rows) {
   let remote = null;
-  const events = [];
-  for (const row of (rows || [])) {
-    const event = rowToEvent(row);
-    if (!event) continue;
-    remote = applyOperations(remote, event.patch);
-    events.push(event);
-  }
+  const events = (rows || []).map(rowToEvent).filter(Boolean);
+  events.sort(compareEvents);
+  for (const event of events) remote = applyOperations(remote, event.patch);
   return { remote, events };
+}
+function hasAmbiguousRemoteOverwrite(events) {
+  for (let i = 0; i < events.length; i++) for (let j = i + 1; j < events.length; j++) {
+    const a = events[i], b = events[j];
+    const overlaps = a.patch.some(x => b.patch.some(y => pathsOverlap(x.path || "", y.path || "")));
+    if (!overlaps) continue;
+    if (!Number.isFinite(a.serverTime) || !Number.isFinite(b.serverTime) || a.serverTime === b.serverTime) return true;
+  }
+  return false;
 }
 async function configureBackgroundSync(events) {
   if (!window.MessFirebase || typeof window.MessFirebase.configureBackgroundSync !== "function" ||
@@ -890,6 +942,10 @@ async function syncNow() {
       const incomingAll = parsed.events.filter(e => !lastSeenEventIds.has(e.id));
       const ownIncoming = incomingAll.filter(e => e.device === syncDeviceId);
       const incoming = incomingAll.filter(e => e.device !== syncDeviceId);
+      if (incoming.length && validSharedState(lastSharedState)) {
+        const remoteOnly = applyOperations(lastSharedState, incoming.flatMap(e => e.patch));
+        if (validSharedState(remoteOnly)) markNewEntries(lastSharedState, remoteOnly);
+      }
       const notifiedChanges = classifyMealExpenseChanges(incoming);
       if (incoming.length && (notifiedChanges.meals || notifiedChanges.expenses)) {
         try {
@@ -912,6 +968,11 @@ async function syncNow() {
         break;
       }
       if (pendingEvent && parsed.events.some(e => e.id === pendingEvent.id)) pendingEvent = null;
+      if (hasAmbiguousRemoteOverwrite(parsed.events)) {
+        lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        showSyncConflict(parsed.remote);
+        break;
+      }
       const collisions = [];
       for (const local of localOps) for (const remote of remoteOps) {
         if (pathsOverlap(local.path, remote.path)) collisions.push(local.path || "whole week");
@@ -1175,7 +1236,7 @@ document.getElementById("submitDataBtn").addEventListener("click", () => {
 });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && firebaseConnected && activeGroupId) syncNow(); });
 window.addEventListener("offline", () => setAuthStatus("Offline—not synced. Your data remains saved on this phone.", "error"));
-window.addEventListener("online", () => { if (firebaseConnected && activeGroupId) setAuthStatus("Back online. Tap Sync now to check the selected group.", ""); });
+window.addEventListener("online", () => { if (firebaseConnected && activeGroupId) { setAuthStatus("Back online—refreshing the shared tracker…", ""); syncNow(); } });
 document.getElementById("useCloudBtn").addEventListener("click", () => {
   if (emptyGroupNeedsChoice) {
     emptyGroupNeedsChoice = false;
@@ -1273,14 +1334,18 @@ document.getElementById("mealBody").addEventListener("input", e => {
   const t = e.target; const kind = t.dataset.kind;
   if (kind !== "lunch" && kind !== "dinner") return;
   const k = kind === "lunch" ? 0 : 1;
-  state.meals[+t.dataset.i][+t.dataset.d][k] = num(t.value);
+  const i = +t.dataset.i, d = +t.dataset.d;
+  clearNewMarker(itemMarkerKey("meal", state.members[i], d, k), t);
+  state.meals[i][d][k] = num(t.value);
   refreshMeals(); renderSummary(); saveState();
 });
 
 document.getElementById("expenseBody").addEventListener("input", e => {
   const t = e.target; const f = t.dataset.kind;
   if (!["morning", "night", "extra"].includes(f)) return;
-  state.spend[+t.dataset.i][f] = num(t.value);
+  const i = +t.dataset.i;
+  clearNewMarker(itemMarkerKey("expense", state.members[i], f), t);
+  state.spend[i][f] = num(t.value);
   refreshExpenses(); renderSummary(); saveState();
 });
 

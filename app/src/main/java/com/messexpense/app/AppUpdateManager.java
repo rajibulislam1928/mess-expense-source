@@ -1,6 +1,8 @@
 package com.messexpense.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -18,6 +20,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -41,6 +44,8 @@ final class AppUpdateManager {
     private boolean hasChecked;
     private boolean dialogShown;
     private Release pendingRelease;
+    private android.app.ProgressDialog downloadDialog;
+    private File readyUpdate;
 
     AppUpdateManager(Activity activity) { this.activity = activity; }
 
@@ -162,7 +167,7 @@ final class AppUpdateManager {
 
     private void downloadAndInstall(Release release) {
         pendingRelease = release;
-        android.widget.Toast.makeText(activity, "Downloading update…", android.widget.Toast.LENGTH_SHORT).show();
+        showDownloadProgress(release);
         IO.execute(() -> {
             File finalFile = null;
             String error = null;
@@ -172,6 +177,7 @@ final class AppUpdateManager {
                 File part = new File(dir, "mess-expense-update.apk.part");
                 finalFile = new File(dir, "mess-expense-update.apk");
                 download(release.apkUrl, part);
+                setDownloadMessage("Download complete. Verifying the APK…");
                 PackageInfo archive = activity.getPackageManager().getPackageArchiveInfo(part.getAbsolutePath(), 0);
                 if (archive == null || !activity.getPackageName().equals(archive.packageName))
                     throw new IllegalStateException("Downloaded file is not a Mess Expense APK");
@@ -191,14 +197,73 @@ final class AppUpdateManager {
             activity.runOnUiThread(() -> {
                 if (activity.isFinishing() || activity.isDestroyed()) return;
                 if (failure != null || ready == null || !ready.isFile()) {
-                    new android.app.AlertDialog.Builder(activity).setTitle("Update unavailable")
-                            .setMessage(failure == null ? "Could not prepare the update." : failure)
-                            .setPositiveButton("OK", null).show();
+                    showDownloadFailure(failure == null ? "Could not prepare the update." : failure);
                     return;
                 }
-                openInstaller(ready);
+                showDownloadReady(ready, release);
             });
         });
+    }
+
+    private void showDownloadProgress(Release release) {
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+        android.app.ProgressDialog dialog = new android.app.ProgressDialog(activity);
+        dialog.setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL);
+        dialog.setTitle("Downloading update");
+        dialog.setMessage("Preparing version " + release.versionName + " (build " + release.buildNumber + ")…");
+        dialog.setIndeterminate(true);
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
+        downloadDialog = dialog;
+        dialog.show();
+    }
+
+    private void updateDownloadProgress(long downloaded, long total) {
+        activity.runOnUiThread(() -> {
+            android.app.ProgressDialog dialog = downloadDialog;
+            if (dialog == null || !dialog.isShowing() || activity.isFinishing() || activity.isDestroyed()) return;
+            if (total > 0L) {
+                int percent = (int) Math.min(100L, (downloaded * 100L) / total);
+                dialog.setIndeterminate(false);
+                dialog.setMax(100);
+                dialog.setProgress(percent);
+                dialog.setMessage("Downloading update… " + percent + "%");
+            } else {
+                dialog.setIndeterminate(true);
+                dialog.setMessage(String.format(Locale.US, "Downloading update… %.1f MB", downloaded / 1048576.0));
+            }
+        });
+    }
+
+    private void setDownloadMessage(String message) {
+        activity.runOnUiThread(() -> {
+            android.app.ProgressDialog dialog = downloadDialog;
+            if (dialog != null && dialog.isShowing() && !activity.isFinishing() && !activity.isDestroyed()) {
+                dialog.setIndeterminate(true);
+                dialog.setMessage(message);
+            }
+        });
+    }
+
+    private void showDownloadReady(File apk, Release release) {
+        android.app.ProgressDialog dialog = downloadDialog;
+        downloadDialog = null;
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        new AlertDialog.Builder(activity)
+                .setTitle("Update ready")
+                .setMessage("Version " + release.versionName + " is downloaded and verified. Android will ask you to confirm installation.")
+                .setPositiveButton("Open installer", (d, which) -> openInstaller(apk))
+                .setNegativeButton("Not now", null)
+                .setOnCancelListener(d -> { })
+                .show();
+    }
+
+    private void showDownloadFailure(String message) {
+        android.app.ProgressDialog dialog = downloadDialog;
+        downloadDialog = null;
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        new AlertDialog.Builder(activity).setTitle("Download failed")
+                .setMessage(message).setPositiveButton("Close", null).show();
     }
 
     private void download(String url, File destination) throws Exception {
@@ -217,15 +282,24 @@ final class AppUpdateManager {
             try (InputStream in = new BufferedInputStream(connection.getInputStream());
                  FileOutputStream out = new FileOutputStream(destination)) {
                 byte[] buffer = new byte[16384];
-                long total = 0;
+                long downloaded = 0;
+                long lastUiUpdate = 0;
+                int lastPercent = -1;
                 int read;
                 while ((read = in.read(buffer)) != -1) {
-                    total += read;
-                    if (total > MAX_APK_BYTES) throw new IllegalStateException("Update APK is larger than 50 MB");
+                    downloaded += read;
+                    if (downloaded > MAX_APK_BYTES) throw new IllegalStateException("Update APK is larger than 50 MB");
                     out.write(buffer, 0, read);
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    int percent = length > 0L ? (int) Math.min(100L, (downloaded * 100L) / length) : -1;
+                    if ((percent >= 0 && percent != lastPercent) || now - lastUiUpdate >= 300L) {
+                        updateDownloadProgress(downloaded, length);
+                        lastPercent = percent;
+                        lastUiUpdate = now;
+                    }
                 }
                 out.getFD().sync();
-                if (total < 1024) throw new IllegalStateException("Downloaded update is incomplete");
+                if (downloaded < 1024) throw new IllegalStateException("Downloaded update is incomplete");
             }
         } finally { if (connection != null) connection.disconnect(); }
     }

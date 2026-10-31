@@ -4,7 +4,8 @@ Mess Expense tracks weekly meals and bazaar spending, supports `.xlsx` import/ex
 
 ## Current build
 
-- Current public preview: [Mess Expense 1.3.7 (versionCode 13)](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-preview-2026-10-31-v1.3.7-build13), with this source tagged [`v1.3.7`](https://github.com/rajibulislam1928/mess-expense-source/tree/v1.3.7).
+- Current public preview: [Mess Expense 1.3.8 (versionCode 14)](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-preview-2026-10-31-v1.3.8-build14), with this source tagged [`firebase-preview-2026-10-31-v1.3.8-build14`](https://github.com/rajibulislam1928/mess-expense-source/tree/firebase-preview-2026-10-31-v1.3.8-build14).
+- Previous preview: [Mess Expense 1.3.7 (versionCode 13)](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-preview-2026-10-31-v1.3.7-build13), source tag [`v1.3.7`](https://github.com/rajibulislam1928/mess-expense-source/tree/v1.3.7).
 - Previous public build: [v1.3.6 source](https://github.com/rajibulislam1928/mess-expense-source/releases/tag/v1.3.6-build12) and [Build 12 APK](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-test-2026-10-29-v1.3.6-build12).
 - Package: `com.messexpense.app`; minimum Android version: Android 6 (API 23)
 
@@ -71,3 +72,9 @@ Unless otherwise noted, this project is licensed under the MIT License; see [LIC
 After a group has completed a foreground sync, Android WorkManager checks its Firestore event log on a connected network (no more often than every 15 minutes; Android may defer runs). It replays remote events into a durable local snapshot while the WebView is closed, preserving local unsynced edits when their fields do not overlap. If an edit conflicts with a remote change, the worker leaves the local snapshot untouched; the existing foreground sync resolves the conflict when the app is opened. The WebView restores the background snapshot on next launch. The worker does not upload local edits while the app is closed.
 
 One replaceable notification summarizes newly observed changes from other devices; own-device events are filtered and event IDs/high-water marks suppress duplicate alerts. Android 13+ requests notification permission once. If declined or disabled, enable notifications in Android Settings. Background execution, live Firebase access, conflict behavior, and notification delivery still need emulator or physical-device testing; this candidate was compiled and static/host checks passed but that does not verify live behavior. A Firebase client config used for a private build is not included in source files.
+
+## Mess Expense 1.3.8 public preview (versionCode 14)
+
+This is a debug-signed preview, not a production release. It adds a public GitHub-release updater with Android's user-confirmed Install flow, deletes its cached APK after a successful update, a collapsible background-sync diagnostics panel, and a drawer for Firebase/group controls with the selected group name kept in the main header. It also includes fixes for notification-permission prompting and disabled notification-channel handling.
+
+The APK build and signature checks passed, and its signing certificate matches the public 1.3.7 preview. No device, updater, notification-delivery, or live Firebase tests were performed. WorkManager scheduling and real-device update/sync behavior are therefore unverified. The public source excludes `google-services.json`, service-account credentials, passwords, and signing keys.

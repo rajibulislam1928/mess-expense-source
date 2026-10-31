@@ -1,21 +1,27 @@
 package com.messexpense.app;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.Manifest;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.provider.Settings;
+import android.net.Uri;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
+import androidx.work.WorkInfo;
 
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
@@ -262,6 +268,56 @@ public final class FirebaseBridge {
         return value instanceof Number && Double.isFinite(((Number) value).doubleValue()) && ((Number) value).doubleValue() >= 0;
     }
 
+    /** Returns local notification and WorkManager health for the in-app diagnostics panel. */
+    @JavascriptInterface
+    public void getBackgroundSyncDiagnostics(String callbackId) {
+        try {
+            android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+            boolean appAllowed = NotificationManagerCompat.from(activity).areNotificationsEnabled();
+            boolean runtimeAllowed = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+                    activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+            String channelStatus;
+            int channelImportance = -1;
+            if (Build.VERSION.SDK_INT < 26) {
+                channelStatus = "not_applicable";
+            } else {
+                NotificationManager manager = activity.getSystemService(NotificationManager.class);
+                NotificationChannel channel = manager == null ? null : manager.getNotificationChannel("mess_expense_remote_updates");
+                if (channel == null) channelStatus = "not_created";
+                else {
+                    channelImportance = channel.getImportance();
+                    channelStatus = channelImportance == NotificationManager.IMPORTANCE_NONE ? "disabled" : "enabled";
+                }
+            }
+            String workState = "unknown";
+            try {
+                java.util.List<WorkInfo> infos = WorkManager.getInstance(activity)
+                        .getWorkInfosForUniqueWork(BackgroundSyncWorker.UNIQUE_WORK).get(3, TimeUnit.SECONDS);
+                if (infos == null || infos.isEmpty()) workState = "not_scheduled";
+                else {
+                    WorkInfo info = infos.get(0);
+                    workState = info.getState().name();
+                    if (info.getState() == WorkInfo.State.FAILED && info.getOutputData().getKeyValueMap().containsKey("error")) {
+                        String workError = info.getOutputData().getString("error");
+                        if (workError != null && !workError.isEmpty()) prefs.edit().putString(BackgroundSyncWorker.KEY_LAST_ERROR, workError).apply();
+                    }
+                }
+            } catch (Exception ignored) { workState = "unavailable"; }
+            JSONObject data = new JSONObject();
+            data.put("lastAttempt", prefs.getLong(BackgroundSyncWorker.KEY_LAST_ATTEMPT, 0L));
+            data.put("lastSuccess", prefs.getLong(BackgroundSyncWorker.KEY_LAST_SUCCESS, 0L));
+            data.put("lastError", prefs.getString(BackgroundSyncWorker.KEY_LAST_ERROR, ""));
+            data.put("workerState", workState);
+            data.put("appNotificationsAllowed", appAllowed);
+            data.put("runtimePermissionAllowed", runtimeAllowed);
+            data.put("channelStatus", channelStatus);
+            data.put("channelImportance", channelImportance);
+            callback(callbackId, success("\"diagnostics\":" + data));
+        } catch (Exception e) {
+            callback(callbackId, error("Could not read notification diagnostics: " + safeMessage(e)));
+        }
+    }
+
     /** Starts periodic remote-event checks after the foreground sync establishes a baseline. */
     @JavascriptInterface
     public void configureBackgroundSync(String callbackId, String groupId, String groupName,
@@ -326,19 +382,53 @@ public final class FirebaseBridge {
         }
     }
 
+    private static final String KEY_NOTIFICATION_REQUESTED = "notification_permission_requested";
+    private static final String KEY_NOTIFICATION_PROMPT_DISMISSED = "notification_permission_prompt_dismissed";
+
     private void requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(activity,
-                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return;
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE).edit()
+                    .remove(KEY_NOTIFICATION_PROMPT_DISMISSED).apply();
+            return;
+        }
         android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
-        if (prefs.getBoolean("notification_permission_prompted", false)) return;
-        prefs.edit().putBoolean("notification_permission_prompted", true).apply();
-        activity.runOnUiThread(() -> new android.app.AlertDialog.Builder(activity)
-                .setTitle("Allow sync notifications?")
-                .setMessage("Get an alert when another group member changes the shared tracker. Your own changes won’t trigger notifications.")
-                .setPositiveButton("Continue", (dialog, which) -> activity.requestPermissions(
-                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7403))
-                .setNegativeButton("Not now", (dialog, which) -> dialog.dismiss())
-                .show());
+        if (prefs.getBoolean(KEY_NOTIFICATION_PROMPT_DISMISSED, false)) return;
+        boolean requestedBefore = prefs.getBoolean(KEY_NOTIFICATION_REQUESTED, false);
+        boolean canAskAgain = !requestedBefore || activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS);
+        activity.runOnUiThread(() -> {
+            android.app.AlertDialog.Builder dialog = new android.app.AlertDialog.Builder(activity)
+                    .setTitle("Allow sync notifications?")
+                    .setMessage("Get an alert when another group member changes the shared tracker. Your own changes won’t trigger notifications.");
+            if (canAskAgain) {
+                dialog.setPositiveButton("Continue", (d, which) -> {
+                    prefs.edit().putBoolean(KEY_NOTIFICATION_REQUESTED, true).apply();
+                    activity.requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7403);
+                });
+            } else {
+                dialog.setPositiveButton("Open Settings", (d, which) -> openNotificationSettings());
+            }
+            dialog.setNegativeButton("Not now", (d, which) ->
+                    prefs.edit().putBoolean(KEY_NOTIFICATION_PROMPT_DISMISSED, true).apply());
+            dialog.show();
+        });
+    }
+
+    private void openNotificationSettings() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= 26) {
+            intent = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, activity.getPackageName())
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, "mess_expense_remote_updates");
+        } else {
+            intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + activity.getPackageName()));
+        }
+        try { activity.startActivity(intent); }
+        catch (Exception ignored) {
+            activity.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + activity.getPackageName())));
+        }
     }
 
     @JavascriptInterface

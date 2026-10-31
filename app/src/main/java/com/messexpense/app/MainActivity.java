@@ -31,6 +31,7 @@ public class MainActivity extends android.app.Activity {
     private boolean migrationStarted;
     private FirebaseBridge firebaseBridge;
     private FileBridge fileBridge;
+    private AppUpdateManager appUpdateManager;
     private final Handler lifecycleHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshUiActiveMarker = new Runnable() {
         @Override public void run() {
@@ -45,6 +46,7 @@ public class MainActivity extends android.app.Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        appUpdateManager = new AppUpdateManager(this);
         webView = new WebView(this);
         setContentView(webView);
 
@@ -167,6 +169,7 @@ public class MainActivity extends android.app.Activity {
                     // and its fragment bootstrap had a chance to copy the prior local state.
                     getPreferences(MODE_PRIVATE).edit().putBoolean(MIGRATED_KEY, true).apply();
                     webView.clearHistory();
+                    if (appUpdateManager != null) appUpdateManager.onAppReady();
                 }
             }
         });
@@ -181,6 +184,12 @@ public class MainActivity extends android.app.Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (appUpdateManager != null) appUpdateManager.onResume();
+    }
+
+    @Override
     protected void onStop() {
         lifecycleHandler.removeCallbacks(refreshUiActiveMarker);
         getSharedPreferences(BackgroundSyncWorker.PREFS, MODE_PRIVATE).edit()
@@ -192,15 +201,21 @@ public class MainActivity extends android.app.Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (fileBridge != null && fileBridge.onActivityResult(requestCode, resultCode, data)) return;
+        if (appUpdateManager != null) appUpdateManager.onActivityResult(requestCode, resultCode);
         if (firebaseBridge != null) firebaseBridge.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
+        if (webView != null) {
+            webView.evaluateJavascript("window.closeSyncDrawer ? window.closeSyncDrawer() : false", value -> {
+                if (!"true".equals(value)) {
+                    if (webView != null && webView.canGoBack()) webView.goBack();
+                    else super.onBackPressed();
+                }
+            });
+            return;
         }
+        super.onBackPressed();
     }
 }

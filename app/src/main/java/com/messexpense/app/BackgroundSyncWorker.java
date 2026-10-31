@@ -43,6 +43,9 @@ public final class BackgroundSyncWorker extends Worker {
     static final String KEY_SYNC_LOCAL_STATE = "sync_local_state";
     static final String KEY_SYNC_EVENT_IDS = "sync_event_ids";
     static final String KEY_UI_ACTIVE_AT = "ui_active_at";
+    static final String KEY_LAST_ATTEMPT = "last_background_attempt_ms";
+    static final String KEY_LAST_SUCCESS = "last_background_success_ms";
+    static final String KEY_LAST_ERROR = "last_background_error";
     static final Object STATE_LOCK = new Object();
     private static final int MAX_STORED_STATE_CHARS = 512 * 1024;
     private static final String CHANNEL_ID = "mess_expense_remote_updates";
@@ -57,6 +60,7 @@ public final class BackgroundSyncWorker extends Worker {
     public Result doWork() {
         Context context = getApplicationContext();
         android.content.SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        prefs.edit().putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis()).apply();
         final String groupId;
         final String deviceId;
         final String baselineJson;
@@ -167,9 +171,14 @@ public final class BackgroundSyncWorker extends Worker {
                 }
                 edit.commit();
             }
+            prefs.edit().putLong(KEY_LAST_SUCCESS, System.currentTimeMillis()).remove(KEY_LAST_ERROR).apply();
             return Result.success();
         } catch (Exception e) {
             if (isStopped()) return Result.success();
+            String message = e.getLocalizedMessage();
+            if (message == null || message.trim().isEmpty()) message = e.getClass().getSimpleName();
+            if (message.length() > 240) message = message.substring(0, 240);
+            prefs.edit().putString(KEY_LAST_ERROR, message).apply();
             return Result.retry();
         }
     }
@@ -380,9 +389,19 @@ public final class BackgroundSyncWorker extends Worker {
     }
 
     private static boolean canNotify(Context context) {
+        // Create the channel before checking it. If the user disabled this channel, do not
+        // advance the notification high-water mark: those unseen updates can be announced
+        // after the channel is re-enabled.
+        createChannel(context);
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) return false;
-        return NotificationManagerCompat.from(context).areNotificationsEnabled();
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            NotificationChannel channel = manager == null ? null : manager.getNotificationChannel(CHANNEL_ID);
+            if (channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE) return false;
+        }
+        return true;
     }
 
     private static void showNotification(Context context, String groupName, int count) {

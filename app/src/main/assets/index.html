@@ -126,6 +126,23 @@
   .auth-status { min-height:1.3em; font-size:13px; color:var(--muted); margin-top:8px; }
   .auth-status.error { color:var(--neg); }
   .auth-status.ok { color:var(--pos); }
+  header .top { position:relative; }
+  #drawerMenuButton { margin-left:auto; padding:8px 12px; min-width:44px; font-size:22px; line-height:1; color:#fff; background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.28); }
+  #drawerScrim { position:fixed; inset:0; z-index:20; background:rgba(10,24,20,.48); }
+  #navigationDrawer { position:fixed; z-index:21; top:0; right:0; bottom:0; width:min(440px,94vw); overflow-y:auto; padding:18px 14px 28px; background:var(--bg); box-shadow:-10px 0 32px rgba(0,0,0,.22); transform:translateX(0); }
+  #navigationDrawer[hidden], #drawerScrim[hidden] { display:none !important; }
+  .drawer-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 2px 12px; }
+  .drawer-head h2 { margin:0; font-size:18px; }
+  #navigationDrawer #accountCard { margin-bottom:0; }
+  #navigationDrawer .btns { margin-top:8px; }
+  #navigationDrawer .btns input { flex:1 1 180px; }
+  #navigationDrawer #groupSelect { width:100%; }
+  #navigationDrawer select { max-width:100%; padding:9px; border:1px solid var(--line); border-radius:10px; background:var(--soft); color:var(--ink); font:inherit; }
+  @media (prefers-reduced-motion: no-preference) { #navigationDrawer { transition:transform .18s ease-out; } }
+  .diagnostic-grid { display:grid; grid-template-columns: minmax(120px, 1fr) 1.5fr; gap:8px 12px; margin-top:12px; font-size:13px; }
+  .diagnostic-grid dt { color:var(--muted); font-weight:600; }
+  .diagnostic-grid dd { margin:0; overflow-wrap:anywhere; }
+  .diagnostic-error { color:var(--neg); }
   .invite-code { font:700 18px ui-monospace,monospace; letter-spacing:1px; overflow-wrap:anywhere; }
   .signed-in-only[hidden], .signed-out-only[hidden] { display:none !important; }
   .summary-table td.num { text-align: center; }
@@ -157,15 +174,13 @@
 <body>
 <header>
   <div class="top">
-    <div class="logo">🍛</div>
-    <div>
-      <h1>Mess Expense Tracker</h1>
-      <p>Meals, bazar spending and who owes whom</p>
-    </div>
+    <h1 id="groupNameHeading" aria-live="polite"></h1>
+    <button id="drawerMenuButton" type="button" aria-label="Open navigation drawer" aria-expanded="false" aria-controls="navigationDrawer">☰</button>
   </div>
 </header>
-
-<main>
+<div id="drawerScrim" hidden></div>
+<aside id="navigationDrawer" aria-label="Navigation drawer" hidden>
+  <div class="drawer-head"><h2>Settings & sync</h2><button class="ghost" id="drawerCloseButton" type="button" aria-label="Close navigation drawer">Close</button></div>
   <!-- FIREBASE SHARED SYNC -->
   <section class="card" id="accountCard">
     <div class="card-head"><div class="ico">☁️</div><h2>Firebase live sync</h2><span class="sub" id="accountLabel">Local only</span></div>
@@ -176,6 +191,19 @@
       <button class="ghost" id="submitDataBtn" disabled>Submit to Firestore</button>
     </div>
     <div class="auth-status" id="authStatus" role="status" aria-live="polite">Your tracker is saved on this phone. Connect Google, then create or join a group to sync.</div>
+    <div class="btns" style="margin-top:8px"><button id="diagnosticsToggle" class="ghost" type="button" aria-expanded="false" aria-controls="backgroundDiagnostics">Background diagnostics</button></div>
+    <div id="backgroundDiagnostics" hidden>
+      <p class="hint">Local status only. Background checks need a successful foreground sync, an active Google session, and network access.</p>
+      <dl class="diagnostic-grid">
+        <dt>Last attempt</dt><dd id="diagLastAttempt">Not recorded</dd>
+        <dt>Last successful check</dt><dd id="diagLastSuccess">Not recorded</dd>
+        <dt>Worker</dt><dd id="diagWorkerState">Not checked</dd>
+        <dt>App notifications</dt><dd id="diagAppPermission">Not checked</dd>
+        <dt>Tracker updates channel</dt><dd id="diagChannelStatus">Not checked</dd>
+        <dt>Worker error</dt><dd id="diagWorkerError">None recorded</dd>
+      </dl>
+      <div class="btns" style="margin-top:10px"><button id="refreshDiagnostics" class="ghost" type="button">Refresh status</button></div>
+    </div>
     <div id="groupPanel" hidden>
       <label class="small" for="groupSelect">Current group</label>
       <div class="btns">
@@ -200,6 +228,9 @@
       <div class="btns"><button id="useCloudBtn" class="ghost">Use shared copy</button><button id="keepLocalBtn">Keep this phone's copy</button></div>
     </div>
   </section>
+</aside>
+
+<main>
   <!-- DATE -->
   <section class="card">
     <div class="card-head"><div class="ico">📅</div><h2>Week</h2><span class="sub" id="weekNo"></span></div>
@@ -569,6 +600,38 @@ window.onFirebaseNativeResult = (id, result) => {
   if (result && result.ok) pending.resolve(result);
   else pending.reject(new Error((result && result.error) || "Google sync failed."));
 };
+function formatDiagnosticTime(value) {
+  return value ? new Date(value).toLocaleString() : "Not recorded";
+}
+async function refreshBackgroundDiagnostics() {
+  const errorEl = document.getElementById("diagWorkerError");
+  try {
+    const result = await nativeFirebaseCall("getBackgroundSyncDiagnostics");
+    const d = result.diagnostics || {};
+    document.getElementById("diagLastAttempt").textContent = formatDiagnosticTime(d.lastAttempt);
+    document.getElementById("diagLastSuccess").textContent = formatDiagnosticTime(d.lastSuccess);
+    document.getElementById("diagWorkerState").textContent = d.workerState || "Unknown";
+    const permission = d.appNotificationsAllowed && d.runtimePermissionAllowed ? "Allowed" : "Blocked";
+    document.getElementById("diagAppPermission").textContent = permission;
+    const channel = d.channelStatus === "enabled" ? "Enabled" + (d.channelImportance === 3 ? " (Default)" : d.channelImportance === 4 ? " (High)" : "") :
+      d.channelStatus === "disabled" ? "Off" : d.channelStatus === "not_created" ? "Not created yet" : d.channelStatus === "not_applicable" ? "Not required on this Android version" : (d.channelStatus || "Unknown");
+    document.getElementById("diagChannelStatus").textContent = channel;
+    errorEl.textContent = d.lastError || "None recorded";
+    errorEl.className = d.lastError ? "diagnostic-error" : "";
+  } catch (error) {
+    errorEl.textContent = (error && error.message) || "Diagnostics unavailable.";
+    errorEl.className = "diagnostic-error";
+  }
+}
+document.getElementById("diagnosticsToggle").addEventListener("click", async () => {
+  const panel = document.getElementById("backgroundDiagnostics");
+  const opened = panel.hidden;
+  panel.hidden = !opened;
+  document.getElementById("diagnosticsToggle").setAttribute("aria-expanded", String(opened));
+  if (opened) await refreshBackgroundDiagnostics();
+});
+document.getElementById("refreshDiagnostics").addEventListener("click", refreshBackgroundDiagnostics);
+
 function setAuthStatus(message, kind = "") {
   const el = document.getElementById("authStatus");
   el.textContent = message;
@@ -902,6 +965,8 @@ function showEmptyGroupChoice() {
   setAuthStatus("Not synced yet: choose whether to share this phone’s existing tracker with the new group.", "error");
 }
 function updateGroupControls() {
+  const heading = document.getElementById("groupNameHeading");
+  if (heading) heading.textContent = currentGroupName();
   const panel = document.getElementById("groupPanel");
   if (!panel) return;
   panel.hidden = !firebaseConnected;
@@ -1147,6 +1212,28 @@ document.getElementById("keepLocalBtn").addEventListener("click", async () => {
     }
   } catch (_) {}
 })();
+
+// ---- Navigation drawer ----
+const navigationDrawer = document.getElementById("navigationDrawer");
+const drawerScrim = document.getElementById("drawerScrim");
+const drawerMenuButton = document.getElementById("drawerMenuButton");
+function setDrawerOpen(open) {
+  window.syncDrawerOpen = open;
+  navigationDrawer.hidden = !open;
+  drawerScrim.hidden = !open;
+  drawerMenuButton.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) document.getElementById("drawerCloseButton").focus();
+  else drawerMenuButton.focus();
+}
+window.closeSyncDrawer = function() {
+  if (navigationDrawer.hidden) return false;
+  setDrawerOpen(false);
+  return true;
+};
+drawerMenuButton.addEventListener("click", () => setDrawerOpen(true));
+document.getElementById("drawerCloseButton").addEventListener("click", () => setDrawerOpen(false));
+drawerScrim.addEventListener("click", () => setDrawerOpen(false));
+document.addEventListener("keydown", event => { if (event.key === "Escape" && !navigationDrawer.hidden) setDrawerOpen(false); });
 
 // ---- Events ----
 document.getElementById("startDate").addEventListener("change", e => {

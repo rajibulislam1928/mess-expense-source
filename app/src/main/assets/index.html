@@ -735,6 +735,26 @@ function diffState(before, after, path = "", out = []) {
   }
   return out;
 }
+function refreshPendingEvent(event, localOps, currentState) {
+  if (!event) return null;
+  let patch = Array.isArray(localOps) && localOps.length ? clone(localOps) : [];
+  if (!patch.length && Array.isArray(event.patch)) {
+    for (const op of event.patch) {
+      if (!op || typeof op.path !== "string") continue;
+      let value = currentState;
+      if (op.path) {
+        for (const key of op.path.split(".")) {
+          if (value == null || !Object.prototype.hasOwnProperty.call(value, key)) { value = undefined; break; }
+          value = value[key];
+        }
+      }
+      if (value !== undefined) patch.push({ path: op.path, value: clone(value) });
+    }
+  }
+  if (!patch.length) return null;
+  return Object.assign({}, event, { patch });
+}
+
 function applyOperations(base, operations) {
   let result = base === null ? null : clone(base);
   for (const op of operations) {
@@ -1006,6 +1026,7 @@ async function syncNow() {
         lastSeenEventIds = new Set(parsed.events.map(e => e.id));
         if (!equal(merged, state)) applyState(merged, incoming.length ? "Updated from the Firebase tracker." : "Your previous edit is saved in Firebase.");
       }
+      if (pendingEvent) pendingEvent = refreshPendingEvent(pendingEvent, localOps, state);
       if (localOps.length && !pendingEvent) {
         const event = { id: "e-" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(16).slice(2)),
           time: new Date().toISOString(), device: syncDeviceId, patch: localOps };

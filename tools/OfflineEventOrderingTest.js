@@ -10,7 +10,7 @@ if (helpersStart < 0 || start < 0 || end < 0) throw new Error('Could not locate 
 const context = {};
 vm.createContext(context);
 vm.runInContext(html.slice(helpersStart, start) + html.slice(start, end), context);
-const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch } = context;
+const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch, refreshPendingEvent } = context;
 const op = (path, value = 1) => ({ path, value });
 const event = (id, serverTime, time, path) => ({
   id, serverTime, time, device: id, patch: [op(path)]
@@ -32,8 +32,17 @@ const validState = { startDate: '2026-09-14', members: ['A'], meals: [[[0, 0], [
 if (!conflictCopiesMatch(validState, JSON.parse(JSON.stringify(validState)))) throw new Error('Identical valid local/shared copies should resolve the conflict');
 const changedState = JSON.parse(JSON.stringify(validState)); changedState.spend[0].morning = 1;
 if (conflictCopiesMatch(validState, changedState)) throw new Error('Different copies must keep the conflict choice visible');
+const stalePending = { id: 'retry', time: '2026-10-31T12:00:00Z', device: 'phone', patch: [op('spend.0.morning', 100)] };
+const latestLocal = JSON.parse(JSON.stringify(validState));
+latestLocal.spend[0].morning = 250;
+const refreshedPending = refreshPendingEvent(stalePending, [op('spend.0.morning', 250)], latestLocal);
+if (!refreshedPending || refreshedPending.id !== stalePending.id || refreshedPending.patch[0].value !== 250)
+  throw new Error('A pending retry must carry the latest local edit, not the older queued amount');
+const revertedPending = refreshPendingEvent(stalePending, [], validState);
+if (!revertedPending || revertedPending.patch[0].value !== 0)
+  throw new Error('A pending retry must preserve a local reversion to the shared value');
 const row = rowToEvent(['newer', newer.time, newer.device, JSON.stringify(newer.patch), 2000]);
 if (!row || row.serverTime !== 2000) throw new Error('FirebaseBridge serverTime column must parse');
 const legacyRow = rowToEvent(['legacy', newer.time, 'old-phone', JSON.stringify([op('spend.0.morning')])]);
 if (!legacyRow || legacyRow.serverTime !== null) throw new Error('Legacy event without serverTime must remain readable');
-console.log('PASS: sync conflict checks ignore old baseline ambiguity and clear only when local/shared copies match');
+console.log('PASS: sync conflict checks and stale pending retries preserve the latest local values');

@@ -816,8 +816,14 @@ async function syncNow() {
     setAuthStatus("Not synced: choose, create, or join a group first. Your data remains on this phone.", "error");
     return;
   }
-  if (isSyncing) { syncAgain = true; return; }
+  if (isSyncing) {
+    syncAgain = true;
+    setAuthStatus("A sync is already running; I’ll check again when it finishes.", "");
+    return;
+  }
   isSyncing = true;
+  updateGroupControls();
+  setAuthStatus("Checking Firebase sync…", "");
   try {
     do {
       syncAgain = false;
@@ -965,6 +971,7 @@ async function syncNow() {
     setAuthStatus(message + " Your local data is still saved. Tap Sync now or reconnect after fixing access.", "error");
   } finally {
     isSyncing = false;
+    updateGroupControls();
   }
 }
 function currentGroupName() {
@@ -990,7 +997,8 @@ function updateGroupControls() {
   panel.hidden = !firebaseConnected;
   const hasGroup = !!activeGroupId && groups.some(g => g.id === activeGroupId);
   const owner = hasGroup && activeGroupRole === "owner";
-  document.getElementById("syncNowBtn").disabled = !hasGroup;
+  document.getElementById("syncNowBtn").disabled = isSyncing;
+  document.getElementById("syncNowBtn").textContent = isSyncing ? "Syncing…" : "Sync now";
   document.getElementById("submitDataBtn").disabled = !firebaseConnected || !hasGroup;
   document.getElementById("createGroupBtn").disabled = !firebaseConnected;
   document.getElementById("joinGroupBtn").disabled = !firebaseConnected;

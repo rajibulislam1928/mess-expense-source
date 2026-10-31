@@ -719,6 +719,9 @@ function validSharedState(value) {
     value.spend.every(row => row && ["morning", "night", "extra"].every(k =>
       Number.isFinite(Number(row[k])) && Number(row[k]) >= 0));
 }
+function conflictCopiesMatch(localState, sharedState) {
+  return validSharedState(localState) && validSharedState(sharedState) && equal(localState, sharedState);
+}
 function diffState(before, after, path = "", out = []) {
   if (equal(before, after)) return out;
   const plain = x => x && typeof x === "object" && !Array.isArray(x);
@@ -801,9 +804,11 @@ function parseLog(rows) {
   for (const event of events) remote = applyOperations(remote, event.patch);
   return { remote, events };
 }
-function hasAmbiguousRemoteOverwrite(events) {
+function hasAmbiguousRemoteOverwrite(events, previouslySeenIds = null) {
   for (let i = 0; i < events.length; i++) for (let j = i + 1; j < events.length; j++) {
     const a = events[i], b = events[j];
+    // Old events already included in our shared baseline cannot create a new conflict by themselves.
+    if (previouslySeenIds && previouslySeenIds.has(a.id) && previouslySeenIds.has(b.id)) continue;
     const overlaps = a.patch.some(x => b.patch.some(y => pathsOverlap(x.path || "", y.path || "")));
     if (!overlaps) continue;
     if (!Number.isFinite(a.serverTime) || !Number.isFinite(b.serverTime) || a.serverTime === b.serverTime) return true;
@@ -964,11 +969,24 @@ async function syncNow() {
       const remoteOps = incoming.flatMap(e => e.patch);
       if (syncBlockedForConflict) {
         conflictRemoteState = clone(parsed.remote);
+        if (conflictCopiesMatch(state, parsed.remote)) {
+          syncBlockedForConflict = false;
+          emptyGroupNeedsChoice = false;
+          conflictNeedsPublish = false;
+          conflictRemoteState = null;
+          pendingEvent = null;
+          document.getElementById("syncConflict").hidden = true;
+          lastSharedState = clone(parsed.remote);
+          lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+          setAuthStatus("Your copy now matches the shared tracker; no conflict needs resolving.", "ok");
+          await configureBackgroundSync(checkpointEvents);
+          break;
+        }
         lastSeenEventIds = new Set(parsed.events.map(e => e.id));
         break;
       }
       if (pendingEvent && parsed.events.some(e => e.id === pendingEvent.id)) pendingEvent = null;
-      if (hasAmbiguousRemoteOverwrite(parsed.events)) {
+      if (hasAmbiguousRemoteOverwrite(parsed.events, lastSeenEventIds)) {
         lastSeenEventIds = new Set(parsed.events.map(e => e.id));
         showSyncConflict(parsed.remote);
         break;

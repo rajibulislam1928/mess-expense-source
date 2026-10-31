@@ -16,6 +16,15 @@ service cloud.firestore {
         && invite.consumedBy == uid
         && invite.expiresAt > request.time;
     }
+    function inviteJoinIsAtomic(groupId, inviteId, uid) {
+      let memberPath = /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
+      let userGroupPath = /databases/$(database)/documents/users/$(uid)/groups/$(groupId);
+      return existsAfter(memberPath)
+        && getAfter(memberPath).data.role == 'member'
+        && getAfter(memberPath).data.inviteId == inviteId
+        && existsAfter(userGroupPath)
+        && getAfter(userGroupPath).data.role == 'member';
+    }
 
     match /groups/{groupId} {
       allow create: if signedIn()
@@ -77,26 +86,39 @@ service cloud.firestore {
 
     match /invites/{inviteId} {
       allow get: if signedIn() && (
-        (resource.data.active == true && resource.data.expiresAt > request.time)
+        (resource.data.active == true
+          && resource.data.consumedBy == null
+          && resource.data.expiresAt > request.time)
         || owner(resource.data.groupId));
       allow list: if owner(resource.data.groupId);
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['groupId', 'groupName', 'createdBy', 'createdAt', 'expiresAt', 'active', 'consumedBy'])
+        && request.resource.data.keys().hasAll(['groupId', 'groupName', 'createdBy', 'createdAt', 'expiresAt', 'active', 'consumedBy'])
         && inviteId.matches('^[0-9A-F]{32}$')
+        && request.resource.data.groupId is string
+        && request.resource.data.groupId.matches('^[A-Za-z0-9_-]{10,100}$')
+        && request.resource.data.groupName is string
+        && request.resource.data.groupName.size() > 0
+        && request.resource.data.groupName.size() <= 50
         && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt is timestamp
         && request.resource.data.active == true
         && request.resource.data.consumedBy == null
+        && request.resource.data.expiresAt is timestamp
         && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(48, 'h')
         && owner(request.resource.data.groupId);
       allow update: if signedIn() && (
         (owner(resource.data.groupId)
+          && resource.data.active == true
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active'])
           && request.resource.data.active == false)
         || (resource.data.active == true
           && resource.data.expiresAt > request.time
           && resource.data.consumedBy == null
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consumedBy'])
-          && request.resource.data.consumedBy == request.auth.uid));
+          && request.resource.data.consumedBy == request.auth.uid
+          && inviteJoinIsAtomic(resource.data.groupId, inviteId, request.auth.uid)));
       allow delete: if owner(resource.data.groupId);
     }
 

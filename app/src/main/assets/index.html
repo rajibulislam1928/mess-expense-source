@@ -730,6 +730,15 @@ function safePatchOperation(op) {
   if (/^spend\.(?:0|[1-9]\d?)\.(?:morning|night|extra)$/.test(path)) return typeof value === "number" && Number.isFinite(value) && value >= 0;
   return false;
 }
+function classifyMealExpenseChanges(events) {
+  const changes = { meals: false, expenses: false };
+  for (const event of events || []) for (const operation of event.patch || []) {
+    const path = String(operation && operation.path || "");
+    if (!path || path === "meals" || path.startsWith("meals.")) changes.meals = true;
+    if (!path || path === "spend" || path.startsWith("spend.")) changes.expenses = true;
+  }
+  return changes;
+}
 function rowToEvent(row) {
   if (!Array.isArray(row) || !row[0] || typeof row[3] !== "string") return null;
   try {
@@ -875,6 +884,15 @@ async function syncNow() {
       const incomingAll = parsed.events.filter(e => !lastSeenEventIds.has(e.id));
       const ownIncoming = incomingAll.filter(e => e.device === syncDeviceId);
       const incoming = incomingAll.filter(e => e.device !== syncDeviceId);
+      const notifiedChanges = classifyMealExpenseChanges(incoming);
+      if (incoming.length && (notifiedChanges.meals || notifiedChanges.expenses)) {
+        try {
+          await nativeFirebaseCall("notifyRemoteChanges", activeGroupId, currentGroupName(),
+            notifiedChanges.meals, notifiedChanges.expenses);
+        } catch (_) {
+          // A notification failure must never prevent sync or conflict handling.
+        }
+      }
       // If a previous append timed out after reaching Firebase, advance the local baseline to
       // include that exact event before deciding whether later remote edits conflict.
       const baseWithOwnWrites = ownIncoming.length

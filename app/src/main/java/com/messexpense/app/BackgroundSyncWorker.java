@@ -109,6 +109,8 @@ public final class BackgroundSyncWorker extends Worker {
             Set<String> newestIds = new HashSet<>();
             if (seenTime != null && !seenTime.isEmpty()) newestIds.addAll(notifiedIds);
             int newRemoteCount = 0;
+            boolean newMealChanges = false;
+            boolean newExpenseChanges = false;
 
             for (DocumentSnapshot document : snapshot.getDocuments()) {
                 String id = document.getId();
@@ -133,7 +135,21 @@ public final class BackgroundSyncWorker extends Worker {
                 if (time.equals(newestTime)) newestIds.add(id);
                 boolean unseenForNotification = seenTime == null || time.compareTo(seenTime) > 0 ||
                         (time.equals(seenTime) && !notifiedIds.contains(id));
-                if (unseenForNotification && !deviceId.equals(device)) newRemoteCount++;
+                if (unseenForNotification && !deviceId.equals(device)) {
+                    newRemoteCount++;
+                    for (int i = 0; i < patch.length(); i++) {
+                        String path = patch.getJSONObject(i).optString("path", "");
+                        if (path.isEmpty()) {
+                            // A full-state snapshot can contain both meal and expense changes.
+                            newMealChanges = true;
+                            newExpenseChanges = true;
+                        } else if (path.equals("meals") || path.startsWith("meals.")) {
+                            newMealChanges = true;
+                        } else if (path.equals("spend") || path.startsWith("spend.")) {
+                            newExpenseChanges = true;
+                        }
+                    }
+                }
             }
 
             JSONObject remote = replay(allEvents);
@@ -153,7 +169,8 @@ public final class BackgroundSyncWorker extends Worker {
             }
 
             if (newRemoteCount > 0 && canNotify(context)) {
-                showNotification(context, prefs.getString(KEY_GROUP_NAME, "your shared group"), newRemoteCount);
+                showNotification(context, prefs.getString(KEY_GROUP_NAME, "your shared group"), newRemoteCount,
+                        newMealChanges, newExpenseChanges);
             }
             synchronized (STATE_LOCK) {
                 if (isStopped() || !groupId.equals(prefs.getString(KEY_GROUP, "")) || uiRecentlyActive(prefs)) return Result.success();
@@ -404,14 +421,36 @@ public final class BackgroundSyncWorker extends Worker {
         return true;
     }
 
-    private static void showNotification(Context context, String groupName, int count) {
+    static boolean notifyRemoteChanges(Context context, String groupName, boolean meals, boolean expenses) {
+        if (!meals && !expenses) return false;
+        if (!canNotify(context)) return false;
+        showNotification(context, groupName, 1, meals, expenses);
+        return true;
+    }
+
+    private static void showNotification(Context context, String groupName, int count,
+                                         boolean meals, boolean expenses) {
         createChannel(context);
         Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         PendingIntent contentIntent = launchIntent == null ? null : PendingIntent.getActivity(context, 0, launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
-        String title = count == 1 ? "New shared tracker update" : "New shared tracker updates";
-        String body = count == 1 ? "A group member updated " + safeGroupName(groupName) + ". Open Mess Expense to apply it."
-                : count + " new changes arrived in " + safeGroupName(groupName) + ". Open Mess Expense to apply them.";
+        String title;
+        String change;
+        if (meals && expenses) {
+            title = "New meal and expense updates";
+            change = "meal and expense tracker";
+        } else if (meals) {
+            title = "New meal update";
+            change = "meal tracker";
+        } else if (expenses) {
+            title = "New expense update";
+            change = "expense tracker";
+        } else {
+            title = count == 1 ? "New shared tracker update" : "New shared tracker updates";
+            change = "shared tracker";
+        }
+        String body = count == 1 ? "A group member changed the " + change + " in " + safeGroupName(groupName) + ". Open Mess Expense to see it."
+                : count + " new " + change + " changes arrived in " + safeGroupName(groupName) + ". Open Mess Expense to see them.";
         NotificationCompat.Builder notification = new NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)

@@ -318,6 +318,22 @@ public final class FirebaseBridge {
         }
     }
 
+    /** Shows a local notification for remote meal/expense changes received by foreground sync. */
+    @JavascriptInterface
+    public void notifyRemoteChanges(String callbackId, String groupId, String groupName,
+                                    boolean meals, boolean expenses) {
+        if (!validGroupId(groupId, callbackId)) return;
+        android.content.SharedPreferences prefs = activity.getSharedPreferences(
+                BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+        if (!groupId.equals(prefs.getString(BackgroundSyncWorker.KEY_GROUP, ""))) {
+            callback(callbackId, error("Sync this selected group before announcing its changes."));
+            return;
+        }
+        boolean notified = BackgroundSyncWorker.notifyRemoteChanges(activity,
+                groupName == null ? "your shared group" : groupName, meals, expenses);
+        callback(callbackId, success("\"notified\":" + notified));
+    }
+
     /** Starts periodic remote-event checks after the foreground sync establishes a baseline. */
     @JavascriptInterface
     public void configureBackgroundSync(String callbackId, String groupId, String groupName,

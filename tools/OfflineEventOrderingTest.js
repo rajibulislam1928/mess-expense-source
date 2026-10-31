@@ -10,7 +10,7 @@ if (helpersStart < 0 || start < 0 || end < 0) throw new Error('Could not locate 
 const context = {};
 vm.createContext(context);
 vm.runInContext(html.slice(helpersStart, start) + html.slice(start, end), context);
-const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch, refreshPendingEvent, captureActiveTrackedDraft, applyActiveTrackedDraft } = context;
+const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch, refreshPendingEvent, captureActiveTrackedDraft, capturePendingTrackedDrafts, applyActiveTrackedDraft } = context;
 const op = (path, value = 1) => ({ path, value });
 const event = (id, serverTime, time, path) => ({
   id, serverTime, time, device: id, patch: [op(path)]
@@ -122,8 +122,37 @@ context.applyState(remoteExpense, null);
 if (liveExpenseInput.value !== '325.5' || context.state.spend[0].morning !== 325.5)
   throw new Error('Production applyState must preserve the actively edited expense value during sync');
 
+// If Android/WebView reports body focus during the callback, a typed but not-yet-saved
+// DOM value must still win over a remote refresh for either tracked input kind.
+const inactiveMealInput = { type: 'number', dataset: { kind: 'dinner', i: '0', d: '3' }, value: '6' };
+const inactiveExpenseInput = { type: 'number', dataset: { kind: 'morning', i: '0' }, value: '91' };
+context.document.activeElement = { type: 'body' };
+context.document.querySelectorAll = () => [inactiveMealInput, inactiveExpenseInput];
+const pendingDomDrafts = capturePendingTrackedDrafts(context.state);
+if (pendingDomDrafts.length !== 2) throw new Error('DOM/state-mismatched meal and expense drafts should survive even without focused input');
+const remoteForUnfocused = JSON.parse(JSON.stringify(validState));
+remoteForUnfocused.meals[0][3][1] = 2;
+remoteForUnfocused.spend[0].morning = 12;
+context.state = JSON.parse(JSON.stringify(validState));
+context.activeTrackedDraft = null;
+context.applyState(remoteForUnfocused, null);
+if (context.state.meals[0][3][1] !== 6 || context.state.spend[0].morning !== 91)
+  throw new Error('Production applyState must preserve changed DOM drafts when WebView focus is lost');
+if (inactiveMealInput.value !== '6' || inactiveExpenseInput.value !== '91')
+  throw new Error('In-place remote refresh must not replace changed unfocused DOM values');
+// An active but unchanged field is not a draft and should receive another member's synced update.
+const unchangedInput = { type: 'number', dataset: { kind: 'morning', i: '0' }, value: '0' };
+context.document.activeElement = unchangedInput;
+context.document.querySelectorAll = () => [unchangedInput];
+context.state = JSON.parse(JSON.stringify(validState));
+const remoteUnchangedField = JSON.parse(JSON.stringify(validState));
+remoteUnchangedField.spend[0].morning = 30;
+context.applyState(remoteUnchangedField, null);
+if (context.state.spend[0].morning !== 30 || unchangedInput.value !== 30)
+  throw new Error('An unchanged focused input must accept the remote value instead of becoming a stale draft');
+
 const row = rowToEvent(['newer', newer.time, newer.device, JSON.stringify(newer.patch), 2000]);
 if (!row || row.serverTime !== 2000) throw new Error('FirebaseBridge serverTime column must parse');
 const legacyRow = rowToEvent(['legacy', newer.time, 'old-phone', JSON.stringify([op('spend.0.morning')])]);
 if (!legacyRow || legacyRow.serverTime !== null) throw new Error('Legacy event without serverTime must remain readable');
-console.log('PASS: sync conflicts, stale retries, and remote refreshes preserve focused meal and expense drafts');
+console.log('PASS: sync conflicts, stale retries, and remote refreshes preserve focused or pending meal and expense drafts');

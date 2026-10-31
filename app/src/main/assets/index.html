@@ -789,17 +789,39 @@ function restoreActiveTrackedDraftFocus(draft) {
   replacement.value = draft.inputValue;
   replacement.focus({ preventScroll: true });
 }
-function updateTrackedInputsFromState(nextState, focusDraft) {
-  const focusedIndex = focusDraft ? activeTrackedDraftIndex(nextState, focusDraft) : -1;
+function trackedDraftKey(draft) {
+  return [draft.member, draft.kind, draft.day === null ? "" : draft.day].join("\u0000");
+}
+function capturePendingTrackedDrafts(currentState) {
+  if (typeof document === "undefined" || !document.querySelectorAll) return [];
+  const drafts = [];
+  for (const input of document.querySelectorAll("#mealBody input[data-kind], #expenseBody input[data-kind]")) {
+    const draft = captureActiveTrackedDraft(currentState, input);
+    if (!draft) continue;
+    const expected = draft.day === null
+      ? currentState.spend[draft.index][draft.kind]
+      : currentState.meals[draft.index][draft.day][draft.slot];
+    // The WebView may deliver a sync callback between changing the DOM value and firing
+    // its input event, or after transient focus loss. Treat a DOM/state mismatch as an
+    // uncommitted edit; an unchanged focused value must still accept the remote update.
+    if (String(input.value) !== String(expected)) drafts.push(draft);
+  }
+  return drafts;
+}
+function updateTrackedInputsFromState(nextState, drafts) {
+  const draftList = Array.isArray(drafts) ? drafts : (drafts ? [drafts] : []);
+  const pending = new Set(draftList.map(draft => {
+    const index = activeTrackedDraftIndex(nextState, draft);
+    return index < 0 ? "" : [nextState.members[index], draft.kind, draft.day === null ? "" : draft.day].join("\u0000");
+  }));
   for (const input of document.querySelectorAll("#mealBody input[data-kind], #expenseBody input[data-kind]")) {
     const index = Number(input.dataset.i);
     if (!Number.isInteger(index) || index < 0 || index >= nextState.members.length) continue;
     const kind = input.dataset.kind;
-    const isFocusedDraft = focusDraft && index === focusedIndex && kind === focusDraft.kind &&
-      (focusDraft.day === null || Number(input.dataset.d) === focusDraft.day);
-    if (isFocusedDraft || input === document.activeElement) continue;
+    const day = kind === "lunch" || kind === "dinner" ? Number(input.dataset.d) : null;
+    const key = [nextState.members[index], kind, day === null ? "" : day].join("\u0000");
+    if (pending.has(key)) continue;
     if (kind === "lunch" || kind === "dinner") {
-      const day = Number(input.dataset.d);
       const slot = kind === "dinner" ? 1 : 0;
       if (Number.isInteger(day) && nextState.meals[index]?.[day]) input.value = nextState.meals[index][day][slot];
     } else if (["morning", "night", "extra"].includes(kind) && nextState.spend[index]) {
@@ -928,8 +950,23 @@ function stopBackgroundSync() {
 function applyState(next, message) {
   if (!validSharedState(next)) throw new Error("Firebase returned unexpected tracker data; it wasn't applied.");
   const previousMembers = state.members.slice();
-  const focusedDraft = captureActiveTrackedDraft(state, document.activeElement);
-  const activeDraft = focusedDraft || activeTrackedDraft;
+  const activeElementDraft = captureActiveTrackedDraft(state, document.activeElement);
+  const drafts = capturePendingTrackedDrafts(state);
+  if (activeElementDraft && String(activeElementDraft.inputValue) !== String(
+      activeElementDraft.day === null
+        ? state.spend[activeElementDraft.index][activeElementDraft.kind]
+        : state.meals[activeElementDraft.index][activeElementDraft.day][activeElementDraft.slot]) &&
+      !drafts.some(draft => trackedDraftKey(draft) === trackedDraftKey(activeElementDraft))) drafts.push(activeElementDraft);
+  const rememberedDraft = activeTrackedDraft;
+  if (rememberedDraft && !drafts.some(draft => trackedDraftKey(draft) === trackedDraftKey(rememberedDraft))) {
+    const draftIndex = activeTrackedDraftIndex(state, rememberedDraft);
+    if (draftIndex >= 0) {
+      const currentValue = rememberedDraft.day === null
+        ? state.spend[draftIndex][rememberedDraft.kind]
+        : state.meals[draftIndex][rememberedDraft.day][rememberedDraft.slot];
+      if (String(currentValue) !== rememberedDraft.inputValue) drafts.push(rememberedDraft);
+    }
+  }
   const sameRoster = equal(previousMembers, next.members.map(String));
   applyingRemoteState = true;
   state = {
@@ -938,19 +975,20 @@ function applyState(next, message) {
     meals: next.meals.map(row => row.map(day => [num(day[0]), num(day[1])])),
     spend: next.spend.map(row => ({ morning: num(row.morning), night: num(row.night), extra: num(row.extra) }))
   };
-  const keptDraft = applyActiveTrackedDraft(state, activeDraft);
+  const keptDrafts = drafts.filter(draft => applyActiveTrackedDraft(state, draft));
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
   renderDates();
   if (sameRoster) {
-    // Do not replace the editable table nodes during a live sync. Replacing a focused
-    // WebView number input can discard Android's in-progress text before its input event.
-    updateTrackedInputsFromState(state, activeDraft);
+    // Do not replace editable table nodes during a live sync. Keep every DOM value that
+    // differs from state, including delayed Android input events, while updating other cells.
+    updateTrackedInputsFromState(state, keptDrafts);
     refreshMeals(); refreshExpenses(); renderMembers(); renderSummary();
   } else {
-    renderMeals(activeDraft); renderExpenses(activeDraft); renderMembers(); renderSummary();
+    renderMeals(false); renderExpenses(false); renderMembers(); renderSummary();
+    keptDrafts.forEach(restoreActiveTrackedDraftFocus);
   }
   applyingRemoteState = false;
-  if (keptDraft) queueFirebaseSave();
+  if (keptDrafts.length) queueFirebaseSave();
   if (message) setAuthStatus(message, "ok");
 }
 function queueFirebaseSave() {

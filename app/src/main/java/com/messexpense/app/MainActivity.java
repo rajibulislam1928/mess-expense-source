@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.net.Uri;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
@@ -29,6 +31,14 @@ public class MainActivity extends android.app.Activity {
     private boolean migrationStarted;
     private FirebaseBridge firebaseBridge;
     private FileBridge fileBridge;
+    private final Handler lifecycleHandler = new Handler(Looper.getMainLooper());
+    private final Runnable refreshUiActiveMarker = new Runnable() {
+        @Override public void run() {
+            getSharedPreferences(BackgroundSyncWorker.PREFS, MODE_PRIVATE).edit()
+                    .putLong(BackgroundSyncWorker.KEY_UI_ACTIVE_AT, System.currentTimeMillis()).apply();
+            lifecycleHandler.postDelayed(this, 30_000L);
+        }
+    };
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -161,6 +171,21 @@ public class MainActivity extends android.app.Activity {
             }
         });
         webView.loadUrl(APP_URL + fragment);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        lifecycleHandler.removeCallbacks(refreshUiActiveMarker);
+        refreshUiActiveMarker.run();
+    }
+
+    @Override
+    protected void onStop() {
+        lifecycleHandler.removeCallbacks(refreshUiActiveMarker);
+        getSharedPreferences(BackgroundSyncWorker.PREFS, MODE_PRIVATE).edit()
+                .putLong(BackgroundSyncWorker.KEY_UI_ACTIVE_AT, System.currentTimeMillis()).apply();
+        super.onStop();
     }
 
     @Override

@@ -4,12 +4,11 @@ Mess Expense tracks weekly meals and bazaar spending, supports `.xlsx` import/ex
 
 ## Current build
 
-- App version: `1.3.6` (`versionCode` 12)
-- Source snapshot: [GitHub source release v1.3.6-build12](https://github.com/rajibulislam1928/mess-expense-source/releases/tag/v1.3.6-build12)
-- APK: [Build 12 GitHub prerelease](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-test-2026-10-29-v1.3.6-build12)
+- Current public preview: [Mess Expense 1.3.7 (versionCode 13)](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-preview-2026-10-31-v1.3.7-build13), with this source tagged [`v1.3.7`](https://github.com/rajibulislam1928/mess-expense-source/tree/v1.3.7).
+- Previous public build: [v1.3.6 source](https://github.com/rajibulislam1928/mess-expense-source/releases/tag/v1.3.6-build12) and [Build 12 APK](https://github.com/rajibulislam1928/mess-expense-apk/releases/tag/firebase-test-2026-10-29-v1.3.6-build12).
 - Package: `com.messexpense.app`; minimum Android version: Android 6 (API 23)
 
-Build 12 fixes Firestore data encoding for nested arrays, the reserved Firestore field name, and a missing `keptEmptyGroupId` declaration. The codec regression test, build checks, JavaScript syntax checks, and APK signature verification passed for the published build. The APK is debug-signed and is for testing, not a production Play Store release.
+Build 12 fixed Firestore data encoding for nested arrays, the reserved Firestore field name, and a missing `keptEmptyGroupId` declaration. The 1.3.7 preview adds background event polling, safe non-conflicting updates to durable local state, and change notifications. Build, codec/patch-decode regression, JavaScript syntax, and APK signature checks passed. No emulator or physical-device, live Firebase, background-merge/conflict, or notification-delivery test was run. This is debug-signed pre-production software, not a Play Store release; it does not replace the restored installed APK.
 
 ## Firebase and test status
 
@@ -65,3 +64,10 @@ The debug APK uses the standard debug signing key and is for testing, not Play S
 ## License
 
 Unless otherwise noted, this project is licensed under the MIT License; see [LICENSE](LICENSE).
+
+
+## Background sync and change notifications (1.3.7 public preview)
+
+After a group has completed a foreground sync, Android WorkManager checks its Firestore event log on a connected network (no more often than every 15 minutes; Android may defer runs). It replays remote events into a durable local snapshot while the WebView is closed, preserving local unsynced edits when their fields do not overlap. If an edit conflicts with a remote change, the worker leaves the local snapshot untouched; the existing foreground sync resolves the conflict when the app is opened. The WebView restores the background snapshot on next launch. The worker does not upload local edits while the app is closed.
+
+One replaceable notification summarizes newly observed changes from other devices; own-device events are filtered and event IDs/high-water marks suppress duplicate alerts. Android 13+ requests notification permission once. If declined or disabled, enable notifications in Android Settings. Background execution, live Firebase access, conflict behavior, and notification delivery still need emulator or physical-device testing; this candidate was compiled and static/host checks passed but that does not verify live behavior. A Firebase client config used for a private build is not included in source files.

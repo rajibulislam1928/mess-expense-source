@@ -33,6 +33,10 @@ public final class FirestoreArrayCodecTest {
         Map<?, ?> encodedOp = (Map<?, ?>) ((List<?>) payload.get("patch")).get(0);
         Object decodedState = FirestoreArrayCodec.decode(encodedOp.get("value"));
         if (!state.equals(decodedState)) throw new AssertionError("Round-trip changed nested tracker state\n" + decodedState);
+        // Match the background worker: decode the raw Firestore patch list before JSON conversion.
+        Object decodedPatch = FirestoreArrayCodec.decode(payload.get("patch"));
+        if (!(decodedPatch instanceof List<?>) || !event.get("patch").equals(decodedPatch))
+            throw new AssertionError("Background worker patch decode changed event data\n" + decodedPatch);
 
         // Preserve ordinary map/list values and handle empty arrays without confusing markers.
         Object empty = FirestoreArrayCodec.decode(FirestoreArrayCodec.encode(new ArrayList<>()));

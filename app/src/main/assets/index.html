@@ -332,12 +332,25 @@ const STORAGE_KEY = "mess-expense-state-v1";
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+  if (activeGroupId && window.MessFirebase && typeof window.MessFirebase.saveBackgroundLocalState === "function") {
+    try { window.MessFirebase.saveBackgroundLocalState(activeGroupId, JSON.stringify(state)); } catch (_) {}
+  }
   if (!applyingRemoteState) queueFirebaseSave();
 }
 
 function loadSavedState() {
   try {
-    const d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    let d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    let backgroundSnapshot = null;
+    if (activeGroupId && window.MessFirebase && typeof window.MessFirebase.getBackgroundSyncSnapshot === "function") {
+      try {
+        const snapshot = JSON.parse(window.MessFirebase.getBackgroundSyncSnapshot(activeGroupId) || "{}");
+        if (snapshot && snapshot.groupId === activeGroupId && validSharedState(snapshot.baselineState) && validSharedState(snapshot.localState)) {
+          backgroundSnapshot = snapshot;
+          d = snapshot.localState;
+        }
+      } catch (_) {}
+    }
     if (!d || !Array.isArray(d.members) || !Array.isArray(d.meals) || !Array.isArray(d.spend)) return false;
     state = {
       startDate: /^\d{4}-\d{2}-\d{2}$/.test(d.startDate || "") ? d.startDate : "2026-09-14",
@@ -351,6 +364,11 @@ function loadSavedState() {
         return { morning: num(spend.morning), night: num(spend.night), extra: num(spend.extra) };
       })
     };
+    if (backgroundSnapshot) {
+      lastSharedState = clone(backgroundSnapshot.baselineState);
+      lastSeenEventIds = new Set(Array.isArray(backgroundSnapshot.seenEventIds) ? backgroundSnapshot.seenEventIds.map(String) : []);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+    }
     return state.members.length > 0;
   } catch (_) { return false; }
 }
@@ -577,6 +595,7 @@ window.onFirebaseListenerError = message => {
   setAuthStatus(message || "Firebase listener stopped.", "error");
 };
 function setDisconnected() {
+  stopBackgroundSync();
   firebaseConnected = false;
   firebaseReady = false;
   stopFirebaseListener();
@@ -653,7 +672,7 @@ function rowToEvent(row) {
   try {
     const patch = JSON.parse(row[3]);
     if (!Array.isArray(patch) || !patch.length || !patch.every(safePatchOperation)) return null;
-    return { id: String(row[0]), device: String(row[2] || ""), patch };
+    return { id: String(row[0]), time: String(row[1] || ""), device: String(row[2] || ""), patch };
   } catch (_) { return null; }
 }
 function parseLog(rows) {
@@ -666,6 +685,20 @@ function parseLog(rows) {
     events.push(event);
   }
   return { remote, events };
+}
+async function configureBackgroundSync(events) {
+  if (!window.MessFirebase || typeof window.MessFirebase.configureBackgroundSync !== "function" ||
+      !activeGroupId || !lastSharedState || !validSharedState(lastSharedState) || !validSharedState(state)) return;
+  const latestTime = events.reduce((latest, event) => event.time > latest ? event.time : latest, "");
+  const latestIds = events.filter(event => event.time === latestTime).map(event => event.id);
+  await nativeFirebaseCall("configureBackgroundSync", activeGroupId, currentGroupName(), syncDeviceId,
+    latestTime, JSON.stringify(latestIds), JSON.stringify(lastSharedState), JSON.stringify(state),
+    JSON.stringify(Array.from(lastSeenEventIds)));
+}
+function stopBackgroundSync() {
+  if (window.MessFirebase && typeof window.MessFirebase.stopBackgroundSync === "function") {
+    try { window.MessFirebase.stopBackgroundSync(); } catch (_) {}
+  }
 }
 function applyState(next, message) {
   if (!validSharedState(next)) throw new Error("Firebase returned unexpected tracker data; it wasn't applied.");
@@ -718,6 +751,7 @@ async function syncNow() {
       syncAgain = false;
       const response = await nativeFirebaseCall("readEvents", activeGroupId);
       const parsed = parseLog(response.rows);
+      let checkpointEvents = parsed.events;
       firebaseReady = true;
       startFirebaseListener();
       if (!parsed.remote) {
@@ -744,12 +778,14 @@ async function syncNow() {
         });
         lastSharedState = clone(after.remote || state);
         lastSeenEventIds = new Set(after.events.map(e => e.id));
+        checkpointEvents = after.events;
         if (competingSeed) {
           const otherCopy = applyOperations(null, competingSeed.patch);
           showSyncConflict(after.remote || otherCopy, true);
           break;
         }
         setAuthStatus("Synced to “" + (currentGroupName() || "this group") + "”. Other members receive updates while online.", "ok");
+        await configureBackgroundSync(checkpointEvents);
         continue;
       }
       if (!lastSharedState) {
@@ -770,6 +806,7 @@ async function syncNow() {
         applyState(parsed.remote, "Loaded the shared tracker from Firebase.");
         lastSharedState = clone(parsed.remote);
         lastSeenEventIds = new Set(parsed.events.map(e => e.id));
+        await configureBackgroundSync(checkpointEvents);
         continue;
       }
       const incomingAll = parsed.events.filter(e => !lastSeenEventIds.has(e.id));
@@ -816,6 +853,7 @@ async function syncNow() {
         if (pendingEvent && pendingEvent.id === eventBeingSent.id) pendingEvent = null;
         const verify = await nativeFirebaseCall("readEvents", activeGroupId);
         const saved = parseLog(verify.rows);
+        checkpointEvents = saved.events;
         const externalDuringWrite = saved.events.filter(e => !seenBeforeAppend.has(e.id) && e.device !== syncDeviceId);
         const sameFieldRace = externalDuringWrite.some(external =>
           eventBeingSent.patch.some(local => external.patch.some(remote => pathsOverlap(local.path || "", remote.path || ""))));
@@ -836,6 +874,7 @@ async function syncNow() {
       } else if (!incoming.length && !localOps.length) {
         setAuthStatus("Synced with “" + (currentGroupName() || "this group") + "”. Other members receive live updates while online.", "ok");
       }
+      if (lastSharedState && !syncBlockedForConflict) await configureBackgroundSync(checkpointEvents);
     } while (syncAgain && firebaseConnected && !syncBlockedForConflict);
   } catch (error) {
     const message = error && error.message ? error.message : "Firebase sync failed.";
@@ -929,6 +968,7 @@ async function selectActiveGroup(groupId, shouldSync = true) {
   const oldId = activeGroupId;
   if (oldId === groupId) return;
   stopFirebaseListener();
+  stopBackgroundSync();
   activeGroupId = groupId;
   const selected = groups.find(g => g.id === groupId);
   activeGroupRole = selected ? selected.role : "";

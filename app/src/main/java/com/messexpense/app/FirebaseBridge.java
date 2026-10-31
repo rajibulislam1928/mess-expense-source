@@ -2,10 +2,20 @@ package com.messexpense.app;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.Manifest;
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
+import androidx.work.Constraints;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.NetworkType;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
@@ -28,6 +38,7 @@ import com.google.firebase.Timestamp;
 
 import java.security.SecureRandom;
 import java.util.Date;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -195,6 +206,139 @@ public final class FirebaseBridge {
         } catch (Exception e) {
             callback(callbackId, error("Could not save Firebase sync event: " + safeMessage(e)));
         }
+    }
+
+    /** Returns the last durable sync snapshot only for the currently selected group. */
+    @JavascriptInterface
+    public String getBackgroundSyncSnapshot(String groupId) {
+        if (groupId == null || groupId.isEmpty()) return "{}";
+        synchronized (BackgroundSyncWorker.STATE_LOCK) {
+            android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+            if (!groupId.equals(prefs.getString(BackgroundSyncWorker.KEY_GROUP, ""))) return "{}";
+            try {
+                JSONObject result = new JSONObject();
+                result.put("groupId", groupId);
+                result.put("baselineState", new JSONObject(prefs.getString(BackgroundSyncWorker.KEY_SYNC_BASE_STATE, "{}")));
+                result.put("localState", new JSONObject(prefs.getString(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE, "{}")));
+                result.put("seenEventIds", new JSONArray(prefs.getString(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS, "[]")));
+                return result.toString();
+            } catch (Exception ignored) { return "{}"; }
+        }
+    }
+
+    /** Mirrors edits into the same durable store used by the closed-app worker. */
+    @JavascriptInterface
+    public void saveBackgroundLocalState(String groupId, String localStateJson) {
+        if (groupId == null || groupId.isEmpty() || localStateJson == null || localStateJson.length() > 512 * 1024) return;
+        try {
+            JSONObject local = new JSONObject(localStateJson);
+            if (!validLocalState(local)) return;
+            synchronized (BackgroundSyncWorker.STATE_LOCK) {
+                android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+                if (groupId.equals(prefs.getString(BackgroundSyncWorker.KEY_GROUP, "")))
+                    prefs.edit().putString(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE, local.toString()).commit();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean validLocalState(JSONObject state) {
+        JSONArray members = state.optJSONArray("members"), meals = state.optJSONArray("meals"), spend = state.optJSONArray("spend");
+        if (members == null || members.length() == 0 || members.length() > 100 || meals == null || spend == null ||
+                meals.length() != members.length() || spend.length() != members.length()) return false;
+        for (int i = 0; i < members.length(); i++) {
+            if (!(members.opt(i) instanceof String) || meals.optJSONArray(i) == null || meals.optJSONArray(i).length() != 7 || spend.optJSONObject(i) == null) return false;
+            for (int d = 0; d < 7; d++) {
+                JSONArray day = meals.optJSONArray(i).optJSONArray(d);
+                if (day == null || day.length() != 2 || !validLocalNumber(day.opt(0)) || !validLocalNumber(day.opt(1))) return false;
+            }
+            JSONObject amounts = spend.optJSONObject(i);
+            for (String field : new String[]{"morning", "night", "extra"}) if (!validLocalNumber(amounts.opt(field))) return false;
+        }
+        String date = state.optString("startDate", "");
+        return date.isEmpty() || date.matches("\\d{4}-\\d{2}-\\d{2}");
+    }
+
+    private boolean validLocalNumber(Object value) {
+        return value instanceof Number && Double.isFinite(((Number) value).doubleValue()) && ((Number) value).doubleValue() >= 0;
+    }
+
+    /** Starts periodic remote-event checks after the foreground sync establishes a baseline. */
+    @JavascriptInterface
+    public void configureBackgroundSync(String callbackId, String groupId, String groupName,
+                                        String deviceId, String latestEventTime, String latestIdsJson,
+                                        String baselineStateJson, String localStateJson, String syncEventIdsJson) {
+        if (!validGroupId(groupId, callbackId)) return;
+        if (deviceId == null || !deviceId.matches("[A-Za-z0-9_-]{1,120}")) {
+            callback(callbackId, error("Background sync could not identify this phone."));
+            return;
+        }
+        try {
+            JSONArray ids = new JSONArray(latestIdsJson == null ? "[]" : latestIdsJson);
+            JSONArray syncIds = new JSONArray(syncEventIdsJson == null ? "[]" : syncEventIdsJson);
+            JSONObject baseline = new JSONObject(baselineStateJson == null ? "{}" : baselineStateJson);
+            JSONObject local = new JSONObject(localStateJson == null ? "{}" : localStateJson);
+            if (ids.length() > 500 || syncIds.length() > 10000 ||
+                    baseline.toString().length() > 512 * 1024 || local.toString().length() > 512 * 1024)
+                throw new JSONException("Background sync checkpoint is too large.");
+            android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+            synchronized (BackgroundSyncWorker.STATE_LOCK) {
+                prefs.edit().putString(BackgroundSyncWorker.KEY_GROUP, groupId)
+                    .putString(BackgroundSyncWorker.KEY_GROUP_NAME,
+                            groupName == null || groupName.trim().isEmpty() ? "your shared group" : groupName.trim())
+                    .putString(BackgroundSyncWorker.KEY_DEVICE, deviceId)
+                    .putString(BackgroundSyncWorker.KEY_SEEN_TIME, latestEventTime == null ? "" : latestEventTime)
+                    .putString(BackgroundSyncWorker.KEY_SEEN_IDS, ids.toString())
+                    .putString(BackgroundSyncWorker.KEY_SYNC_BASE_STATE, baseline.toString())
+                    .putString(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE, local.toString())
+                    .putString(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS, syncIds.toString())
+                    .commit();
+            }
+            Constraints constraints = new Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build();
+            PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
+                    BackgroundSyncWorker.class, 15, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build();
+            WorkManager.getInstance(activity).enqueueUniquePeriodicWork(
+                    BackgroundSyncWorker.UNIQUE_WORK, ExistingPeriodicWorkPolicy.UPDATE, request);
+            requestNotificationPermissionIfNeeded();
+            callback(callbackId, success(""));
+        } catch (Exception e) {
+            callback(callbackId, error("Background sync could not be scheduled: " + safeMessage(e)));
+        }
+    }
+
+    @JavascriptInterface
+    public void stopBackgroundSync() {
+        WorkManager.getInstance(activity).cancelUniqueWork(BackgroundSyncWorker.UNIQUE_WORK);
+        synchronized (BackgroundSyncWorker.STATE_LOCK) {
+            activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE).edit()
+                    .remove(BackgroundSyncWorker.KEY_GROUP)
+                    .remove(BackgroundSyncWorker.KEY_GROUP_NAME)
+                    .remove(BackgroundSyncWorker.KEY_DEVICE)
+                    .remove(BackgroundSyncWorker.KEY_SEEN_TIME)
+                    .remove(BackgroundSyncWorker.KEY_SEEN_IDS)
+                    .remove(BackgroundSyncWorker.KEY_SYNC_BASE_STATE)
+                    .remove(BackgroundSyncWorker.KEY_SYNC_LOCAL_STATE)
+                    .remove(BackgroundSyncWorker.KEY_SYNC_EVENT_IDS)
+                    .commit();
+        }
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(activity,
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return;
+        android.content.SharedPreferences prefs = activity.getSharedPreferences(BackgroundSyncWorker.PREFS, Activity.MODE_PRIVATE);
+        if (prefs.getBoolean("notification_permission_prompted", false)) return;
+        prefs.edit().putBoolean("notification_permission_prompted", true).apply();
+        activity.runOnUiThread(() -> new android.app.AlertDialog.Builder(activity)
+                .setTitle("Allow sync notifications?")
+                .setMessage("Get an alert when another group member changes the shared tracker. Your own changes won’t trigger notifications.")
+                .setPositiveButton("Continue", (dialog, which) -> activity.requestPermissions(
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7403))
+                .setNegativeButton("Not now", (dialog, which) -> dialog.dismiss())
+                .show());
     }
 
     @JavascriptInterface

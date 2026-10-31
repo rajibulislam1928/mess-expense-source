@@ -10,7 +10,7 @@ if (helpersStart < 0 || start < 0 || end < 0) throw new Error('Could not locate 
 const context = {};
 vm.createContext(context);
 vm.runInContext(html.slice(helpersStart, start) + html.slice(start, end), context);
-const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch, refreshPendingEvent } = context;
+const { rowToEvent, compareEvents, hasAmbiguousRemoteOverwrite, conflictCopiesMatch, refreshPendingEvent, captureActiveTrackedDraft, applyActiveTrackedDraft } = context;
 const op = (path, value = 1) => ({ path, value });
 const event = (id, serverTime, time, path) => ({
   id, serverTime, time, device: id, patch: [op(path)]
@@ -41,8 +41,32 @@ if (!refreshedPending || refreshedPending.id !== stalePending.id || refreshedPen
 const revertedPending = refreshPendingEvent(stalePending, [], validState);
 if (!revertedPending || revertedPending.patch[0].value !== 0)
   throw new Error('A pending retry must preserve a local reversion to the shared value');
+
+// A Firebase refresh must preserve the live expense field being edited, even if the
+// snapshot was assembled before that latest keystroke reached the sync diff.
+const expenseDraft = captureActiveTrackedDraft(validState, { type: 'number', dataset: { kind: 'morning', i: '0' }, value: '325.50' });
+const refreshedState = JSON.parse(JSON.stringify(validState));
+if (!applyActiveTrackedDraft(refreshedState, expenseDraft) || refreshedState.spend[0].morning !== 325.5)
+  throw new Error('A remote refresh must retain the focused, unsaved expense draft');
+const mealInput = { type: 'number', dataset: { kind: 'dinner', i: '0', d: '3' }, value: '2' };
+const mealDraft = captureActiveTrackedDraft(validState, mealInput);
+const refreshedMeals = JSON.parse(JSON.stringify(validState));
+if (!applyActiveTrackedDraft(refreshedMeals, mealDraft) || refreshedMeals.meals[0][3][1] !== 2)
+  throw new Error('A remote refresh must retain the focused, unsaved meal draft');
+const reorderedState = JSON.parse(JSON.stringify(validState));
+reorderedState.members = ['B', 'A'];
+reorderedState.meals = [JSON.parse(JSON.stringify(validState.meals[0])), JSON.parse(JSON.stringify(validState.meals[0]))];
+reorderedState.spend = [{ morning: 0, night: 0, extra: 0 }, { morning: 0, night: 0, extra: 0 }];
+if (!applyActiveTrackedDraft(reorderedState, expenseDraft) || reorderedState.spend[1].morning !== 325.5)
+  throw new Error('A remote member reorder must keep the draft attached to the same member');
+const reorderedMeals = JSON.parse(JSON.stringify(reorderedState));
+if (!applyActiveTrackedDraft(reorderedMeals, mealDraft) || reorderedMeals.meals[1][3][1] !== 2)
+  throw new Error('A remote member reorder must preserve the focused meal draft too');
+if (captureActiveTrackedDraft(validState, { type: 'text', dataset: { kind: 'name', i: '0' }, value: 'A' }) !== null)
+  throw new Error('Only focused meal/expense number fields are draft-preserved');
+
 const row = rowToEvent(['newer', newer.time, newer.device, JSON.stringify(newer.patch), 2000]);
 if (!row || row.serverTime !== 2000) throw new Error('FirebaseBridge serverTime column must parse');
 const legacyRow = rowToEvent(['legacy', newer.time, 'old-phone', JSON.stringify([op('spend.0.morning')])]);
 if (!legacyRow || legacyRow.serverTime !== null) throw new Error('Legacy event without serverTime must remain readable');
-console.log('PASS: sync conflict checks and stale pending retries preserve the latest local values');
+console.log('PASS: sync conflicts, stale retries, and remote refreshes preserve focused meal and expense drafts');

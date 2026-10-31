@@ -486,7 +486,7 @@ function renderDates() {
   });
 }
 
-function renderMeals() {
+function renderMeals(focusDraft = null) {
   document.getElementById("mealBody").innerHTML = state.members.map((name, i) => {
     const cells = DAYS.map((_, d) => `
       <td class="sep"><div class="tracked-cell"><input type="number" min="0" step="1" inputmode="numeric" value="${state.meals[i][d][0]}" data-kind="lunch" data-i="${i}" data-d="${d}" aria-label="${esc(name)} ${DAYS[d]} lunch">${renderNewMarker(itemMarkerKey("meal", name, d, 0))}</div></td>
@@ -505,9 +505,12 @@ function renderMeals() {
     `<td class="name">Day total</td>` +
     colTotals.map(([a, b]) => `<td class="sep">${a}</td><td>${b}</td>`).join("") +
     `<td class="sep">${grand}</td>`;
+  if (focusDraft === null) focusDraft = captureActiveTrackedDraft(state, document.activeElement);
+  restoreActiveTrackedDraftFocus(focusDraft);
 }
 
-function renderExpenses() {
+function renderExpenses(focusDraft = null) {
+  if (focusDraft === null) focusDraft = captureActiveTrackedDraft(state, document.activeElement);
   document.getElementById("expenseBody").innerHTML = state.members.map((name, i) => {
     const s = state.spend[i];
     const total = s.morning + s.night + s.extra;
@@ -524,6 +527,7 @@ function renderExpenses() {
   document.getElementById("expenseFoot").innerHTML =
     `<td class="name">Total</td>` + sums.map(v => `<td>${fmt(v)}</td>`).join("") +
     `<td>${fmt(sums.reduce((a, b) => a + b, 0))}</td>`;
+  restoreActiveTrackedDraftFocus(focusDraft);
 }
 
 // Update only totals while typing, so the input being edited keeps focus
@@ -735,6 +739,55 @@ function diffState(before, after, path = "", out = []) {
   }
   return out;
 }
+function captureActiveTrackedDraft(currentState, activeElement) {
+  if (!activeElement || activeElement.type !== "number" || !activeElement.dataset) return null;
+  const kind = activeElement.dataset.kind;
+  const meal = kind === "lunch" || kind === "dinner";
+  const expense = ["morning", "night", "extra"].includes(kind);
+  if (!meal && !expense) return null;
+  const index = Number(activeElement.dataset.i);
+  if (!Number.isInteger(index) || index < 0 || index >= currentState.members.length) return null;
+  const day = meal ? Number(activeElement.dataset.d) : null;
+  if (meal && (!Number.isInteger(day) || day < 0 || day >= 7)) return null;
+  const inputValue = String(activeElement.value);
+  const parsed = Number.parseFloat(inputValue);
+  const value = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  return { member: currentState.members[index], index, kind, day, slot: kind === "dinner" ? 1 : 0, value, inputValue };
+}
+function activeTrackedDraftIndex(nextState, draft) {
+  let index = draft.index;
+  if (nextState.members[index] !== draft.member) {
+    const matches = nextState.members.reduce((found, name, i) => name === draft.member ? [...found, i] : found, []);
+    if (matches.length !== 1) return -1;
+    index = matches[0];
+  }
+  return index;
+}
+function applyActiveTrackedDraft(nextState, draft) {
+  if (!draft) return false;
+  const index = activeTrackedDraftIndex(nextState, draft);
+  if (index < 0) return false;
+  if (draft.kind === "lunch" || draft.kind === "dinner") {
+    if (!nextState.meals[index]?.[draft.day]) return false;
+    nextState.meals[index][draft.day][draft.slot] = draft.value;
+    return true;
+  }
+  if (!["morning", "night", "extra"].includes(draft.kind) || !nextState.spend[index]) return false;
+  nextState.spend[index][draft.kind] = draft.value;
+  return true;
+}
+function restoreActiveTrackedDraftFocus(draft) {
+  if (!draft || typeof document === "undefined") return;
+  const index = activeTrackedDraftIndex(state, draft);
+  if (index < 0) return;
+  const selector = draft.day === null
+    ? `#expenseBody input[data-kind="${draft.kind}"][data-i="${index}"]`
+    : `#mealBody input[data-kind="${draft.kind}"][data-i="${index}"][data-d="${draft.day}"]`;
+  const replacement = document.querySelector(selector);
+  if (!replacement) return;
+  replacement.value = draft.inputValue;
+  replacement.focus({ preventScroll: true });
+}
 function refreshPendingEvent(event, localOps, currentState) {
   if (!event) return null;
   let patch = Array.isArray(localOps) && localOps.length ? clone(localOps) : [];
@@ -851,6 +904,7 @@ function stopBackgroundSync() {
 }
 function applyState(next, message) {
   if (!validSharedState(next)) throw new Error("Firebase returned unexpected tracker data; it wasn't applied.");
+  const activeDraft = captureActiveTrackedDraft(state, document.activeElement);
   applyingRemoteState = true;
   state = {
     startDate: next.startDate,
@@ -858,9 +912,11 @@ function applyState(next, message) {
     meals: next.meals.map(row => row.map(day => [num(day[0]), num(day[1])])),
     spend: next.spend.map(row => ({ morning: num(row.morning), night: num(row.night), extra: num(row.extra) }))
   };
+  const keptDraft = applyActiveTrackedDraft(state, activeDraft);
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
-  renderDates(); renderMeals(); renderExpenses(); renderMembers(); renderSummary();
+  renderDates(); renderMeals(activeDraft); renderExpenses(activeDraft); renderMembers(); renderSummary();
   applyingRemoteState = false;
+  if (keptDraft) queueFirebaseSave();
   if (message) setAuthStatus(message, "ok");
 }
 function queueFirebaseSave() {
